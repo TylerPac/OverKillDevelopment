@@ -1,8 +1,10 @@
 package dev.tylerpac.backend.security;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -21,6 +23,9 @@ import dev.tylerpac.backend.repo.UserRepository;
 
 @Configuration
 public class SecurityConfig {
+
+    @Value("${app.allowed-origins:http://localhost:5173}")
+    private String allowedOrigins;
 
     private final UserRepository userRepository;
 
@@ -58,7 +63,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:5173"));
+        config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
