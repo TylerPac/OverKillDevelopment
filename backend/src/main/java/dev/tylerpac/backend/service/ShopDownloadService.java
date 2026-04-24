@@ -31,8 +31,8 @@ public class ShopDownloadService {
     }
 
     public DownloadAsset loadPaidProductAsset(User user, String productId) {
-        if (!user.isEmailVerified()) {
-            throw new IllegalArgumentException("email_not_verified");
+        if (!StringUtils.hasText(user.getSteam64Id())) {
+            throw new IllegalArgumentException("account_not_setup");
         }
 
         if (!StringUtils.hasText(productId)) {

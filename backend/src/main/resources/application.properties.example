@@ -2,17 +2,18 @@
 # Copy values into your environment / .env file instead.
 
 # Server port used by the Spring Boot app (used in container runtime via SERVER_PORT)
-server.port=8081
+server.port=8080
 
-# JDBC connection for local/dev example
-spring.datasource.url=jdbc:mysql://localhost:3306/OverKillDevelopment?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+# Spring profile and JDBC connection for local/dev example
+spring.profiles.active=dev-mysql
+spring.datasource.url=jdbc:mysql://localhost:3306/tylerpac_dev
 spring.datasource.username=root
 spring.datasource.password=password
 
 # JPA / Hibernate
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect
 
 # Security
 spring.main.allow-bean-definition-overriding=true
@@ -25,5 +26,6 @@ app.shop.currency=usd
 app.shop.success-url=http://localhost:5173
 app.shop.cancel-url=http://localhost:5173
 app.shop.download-root=downloads
-app.stripe.secret-key=sk_test_xxx
-app.stripe.webhook-secret=whsec_xxx
+app.stripe.secret-key=${STRIPE_SECRET_KEY}
+app.stripe.webhook-secret=${STRIPE_WEBHOOK_SECRET}
+app.stripe.premium-price-id=${STRIPE_PREMIUM_PRICE_ID}

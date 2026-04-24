@@ -24,6 +24,7 @@ import dev.tylerpac.backend.dto.CreateCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
+import dev.tylerpac.backend.dto.SubscriptionStatusResponse;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.repo.UserRepository;
 import dev.tylerpac.backend.service.ShopDownloadService;
@@ -61,6 +62,9 @@ public class ShopController {
     ) {
         try {
             User user = requireUser(principal);
+            if (!StringUtils.hasText(user.getSteam64Id())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("account_not_setup");
+            }
             CreateCheckoutSessionResponse response = stripeShopService.createCheckoutSession(user, request.getProductId(), idempotencyKey);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
@@ -76,6 +80,83 @@ public class ShopController {
             User user = requireUser(principal);
             List<ShopOrderResponse> orders = stripeShopService.getOrders(user);
             return ResponseEntity.ok(orders);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/subscription/checkout-session")
+    public ResponseEntity<?> createSubscriptionCheckoutSession(
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        Principal principal
+    ) {
+        try {
+            User user = requireUser(principal);
+            if (!StringUtils.hasText(user.getSteam64Id())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("account_not_setup");
+            }
+            CreateCheckoutSessionResponse response = stripeShopService.createSubscriptionCheckoutSession(user, idempotencyKey);
+            return ResponseEntity.ok(response);
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
+        } catch (StripeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/subscription/sync")
+    public ResponseEntity<?> syncSubscriptionStatus(
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestBody String sessionId,
+        Principal principal
+    ) {
+        try {
+            User user = requireUser(principal);
+            stripeShopService.syncSubscriptionStatusFromSession(user, sessionId);
+            return ResponseEntity.ok("synced");
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "session_id_required", "invalid_subscription_session" ->
+                    ResponseEntity.badRequest().body(ex.getMessage());
+                case "session_user_mismatch" ->
+                    ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+            };
+        } catch (StripeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/subscription/cancel")
+    public ResponseEntity<?> cancelSubscription(Principal principal) {
+        try {
+            User user = requireUser(principal);
+            stripeShopService.cancelSubscription(user);
+            return ResponseEntity.ok("subscription_canceled");
+        } catch (IllegalArgumentException ex) {
+            if ("subscription_not_found".equals(ex.getMessage())) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+            }
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        } catch (StripeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
+        }
+    }
+
+    @GetMapping("/subscription-status")
+    public ResponseEntity<?> subscriptionStatus(Principal principal) {
+        try {
+            User user = requireUser(principal);
+            return ResponseEntity.ok(new SubscriptionStatusResponse(
+                user.isPremiumUser(),
+                user.getStripeSubscriptionStatus(),
+                user.getStripeSubscriptionId(),
+                user.isStripeSubscriptionCancelAtPeriodEnd(),
+                user.getStripeSubscriptionCancelAt(),
+                user.getStripeSubscriptionCurrentPeriodEnd(),
+                true,
+                StringUtils.hasText(user.getSteam64Id())
+            ));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
         }
@@ -98,7 +179,7 @@ public class ShopController {
                 .body(resource);
         } catch (IllegalArgumentException ex) {
             return switch (ex.getMessage()) {
-                case "email_not_verified", "purchase_required" ->
+                case "account_not_setup", "purchase_required" ->
                     ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
                 case "download_not_found" ->
                     ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());

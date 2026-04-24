@@ -1,19 +1,16 @@
 @echo off
 :: Simple dev runner (Windows CMD)
-:: Loads environment variables from root .env.development (fallback: backend\.env.dev)
-:: and runs the Maven wrapper with the 'dev' profile.
+:: Loads environment variables from backend\.env.development
+:: and runs the Maven wrapper with the 'dev-mysql' profile.
 :: Usage (cmd.exe): backend\run-dev.bat
 
 :: Resolve script directory
 set SCRIPT_DIR=%~dp0
-for %%I in ("%SCRIPT_DIR%..") do set ROOT_DIR=%%~fI
 
-set ENV_FILE=%ROOT_DIR%\.env.development
-if not exist "%ENV_FILE%" set ENV_FILE=%SCRIPT_DIR%.env.dev
+set ENV_FILE=%SCRIPT_DIR%.env.development
 if not exist "%ENV_FILE%" (
-  echo Env file not found. Expected either:
-  echo   %ROOT_DIR%\.env.development
-  echo   %SCRIPT_DIR%.env.dev
+  echo Env file not found. Expected:
+  echo   %SCRIPT_DIR%.env.development
   exit /b 1
 )
 
@@ -24,5 +21,6 @@ for /f "usebackq tokens=1* delims== eol=#" %%A in ("%ENV_FILE%") do (
 
 pushd "%SCRIPT_DIR%"
 echo Starting backend in dev profile using %ENV_FILE%...
-call mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev
+if "%SPRING_PROFILES_ACTIVE%"=="" set SPRING_PROFILES_ACTIVE=dev-mysql
+call mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=%SPRING_PROFILES_ACTIVE%
 popd

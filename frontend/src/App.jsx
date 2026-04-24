@@ -1,244 +1,63 @@
 import { useEffect, useMemo, useState } from 'react';
-
-const apiBase =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ||
-  'http://localhost:8081';
-
-const TOKEN_KEY = 'overkilldevelopment_jwt_token';
-const USER_KEY = 'overkilldevelopment_username';
-
-function parseJwt(token) {
-  try {
-    const payload = token.split('.')[1];
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const decoded = atob(normalized);
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
-
-function isTokenValid(token) {
-  if (!token) return false;
-  const payload = parseJwt(token);
-  if (!payload || !payload.exp) return false;
-  return payload.exp * 1000 > Date.now();
-}
-
-async function authRequest(path, username, password, email, options = {}) {
-  const { expectToken = true } = options;
-  const payload = { username, password };
-  if (email !== undefined) {
-    payload.email = email;
-  }
-
-  const response = await fetch(`${apiBase}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  const contentType = response.headers.get('content-type') || '';
-  const body = contentType.includes('application/json') ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    const message = typeof body === 'string' ? body : body?.message || 'Authentication failed';
-    throw new Error(message);
-  }
-
-  if (!expectToken) {
-    return body;
-  }
-
-  if (!body?.token) {
-    throw new Error('No JWT token was returned by the backend');
-  }
-
-  return body.token;
-}
-
-async function callProtected(path, token) {
-  const response = await fetch(`${apiBase}${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(text || `Request failed (${response.status})`);
-  }
-
-  return text;
-}
-
-async function callJson(path, options = {}) {
-  const response = await fetch(`${apiBase}${path}`, options);
-  const contentType = response.headers.get('content-type') || '';
-  const body = contentType.includes('application/json') ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    const message = typeof body === 'string' ? body : body?.message || `Request failed (${response.status})`;
-    throw new Error(message);
-  }
-
-  return body;
-}
-
-function getSessionId(token) {
-  if (!token) return '';
-  const parts = token.split('.');
-  if (parts.length < 3) return token.slice(0, 12);
-  return parts[2].slice(0, 12);
-}
+import useSessionState from './hooks/useSessionState';
+import { getDiscordLinkUrl, getSteamLoginUrl } from './services/authService';
+import { callProtectedText, downloadProductBlob } from './services/apiClient';
+import {
+  cancelSubscription,
+  createCheckoutSession,
+  createSubscriptionCheckoutSession,
+  getOrders,
+  getProducts,
+  getSubscriptionStatus,
+  syncSubscriptionFromSession,
+} from './services/shopService';
+import { boolFromString } from './utils/authToken';
+import AuthView from './views/AuthView';
+import CustomerView from './views/CustomerView';
+import DashboardView from './views/DashboardView';
+import HomeView from './views/HomeView';
+import { PrivacyView, RefundView, TermsView } from './views/PolicyViews';
+import ShopView from './views/ShopView';
+import TierPainterView from './views/TierPainterView';
 
 export default function App() {
   const [view, setView] = useState('home');
-  const [mode, setMode] = useState('login');
-  const [awaitingEmailVerification, setAwaitingEmailVerification] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem(USER_KEY) || '');
-  const [status, setStatus] = useState('Enter a username and password to sign up or log in.');
+  const [status, setStatus] = useState('Sign in with Steam to access your dashboard and purchases.');
   const [protectedData, setProtectedData] = useState('No protected request made yet.');
   const [loading, setLoading] = useState(false);
   const [shopLoading, setShopLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
 
-  const authenticated = useMemo(() => isTokenValid(token), [token]);
-  const sessionId = useMemo(() => getSessionId(token), [token]);
-
-  const emailLooksValid = useMemo(() => {
-    if (!email) return false;
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  }, [email]);
+  const session = useSessionState((message) => {
+    setProtectedData('No protected request made yet.');
+    setOrders([]);
+    setView('home');
+    setStatus(message);
+  });
 
   const paidOrders = useMemo(
     () => orders.filter((order) => String(order.status || '').toUpperCase() === 'PAID'),
     [orders],
   );
 
-  useEffect(() => {
-    if (token && !isTokenValid(token)) {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-      setToken('');
-      setCurrentUser('');
-      setView('auth');
-      setStatus('Session expired. Please log in again.');
-    }
-  }, [token]);
-
-  useEffect(() => {
-    const path = window.location.pathname;
-    if (path !== '/verify-email') {
-      return;
-    }
-
-    const tokenFromUrl = new URLSearchParams(window.location.search).get('token');
-    setView('auth');
-    setMode('login');
-    setAwaitingEmailVerification(false);
-
-    if (!tokenFromUrl) {
-      setStatus('Verification failed: missing token in the link.');
-      window.history.replaceState({}, '', '/');
-      return;
-    }
-
-    async function verifyEmailFromLink() {
-      setLoading(true);
-      setStatus('Verifying your email...');
-
-      try {
-        const response = await fetch(
-          `${apiBase}/auth/verify-email?token=${encodeURIComponent(tokenFromUrl)}`,
-          { method: 'GET' },
-        );
-        const text = await response.text();
-
-        if (!response.ok) {
-          throw new Error(text || 'Verification failed');
-        }
-
-        setStatus('Email verified successfully. You can log in now.');
-      } catch (error) {
-        setStatus(`Verification failed: ${error.message}`);
-      } finally {
-        setLoading(false);
-        window.history.replaceState({}, '', '/');
-      }
-    }
-
-    verifyEmailFromLink();
-  }, []);
-
-  useEffect(() => {
-    const search = new URLSearchParams(window.location.search);
-    const checkout = search.get('checkout');
-    if (!checkout) {
-      return;
-    }
-
-    setView('shop');
-    if (checkout === 'success') {
-      setStatus('Payment completed. Stripe webhook will update your order status shortly.');
-    } else if (checkout === 'cancel') {
-      setStatus('Checkout canceled. No charge was made.');
-    }
-
-    window.history.replaceState({}, '', '/');
-  }, []);
-
-  useEffect(() => {
-    const onStorage = () => {
-      setToken(localStorage.getItem(TOKEN_KEY) || '');
-      setCurrentUser(localStorage.getItem(USER_KEY) || '');
-    };
-
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  function saveSession(nextToken, nextUser) {
-    localStorage.setItem(TOKEN_KEY, nextToken);
-    localStorage.setItem(USER_KEY, nextUser);
-    setToken(nextToken);
-    setCurrentUser(nextUser);
-    setView('dashboard');
-  }
-
-  function clearSession(message) {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    setToken('');
-    setCurrentUser('');
-    setProtectedData('No protected request made yet.');
-    setView('home');
-    setStatus(message);
-    setOrders([]);
-  }
-
   async function loadShopData() {
     setShopLoading(true);
     try {
-      const nextProducts = await callJson('/shop/products');
+      const nextProducts = await getProducts();
       setProducts(Array.isArray(nextProducts) ? nextProducts : []);
 
-      if (!authenticated || !token) {
+      if (!session.authenticated || !session.token) {
         setOrders([]);
         return;
       }
 
-      const nextOrders = await callJson('/shop/orders', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const nextOrders = await getOrders(session.token);
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
+
+      const nextSubscription = await getSubscriptionStatus(session.token);
+      session.applySubscriptionState(nextSubscription);
+      await session.loadAuthProfile(session.token);
     } catch (error) {
       setStatus(`Shop load failed: ${error.message}`);
     } finally {
@@ -247,19 +66,19 @@ export default function App() {
   }
 
   async function loadCustomerData() {
-    if (!authenticated || !token) {
+    if (!session.authenticated || !session.token) {
       setOrders([]);
       return;
     }
 
     setShopLoading(true);
     try {
-      const nextOrders = await callJson('/shop/orders', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const nextOrders = await getOrders(session.token);
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
+
+      const nextSubscription = await getSubscriptionStatus(session.token);
+      session.applySubscriptionState(nextSubscription);
+      await session.loadAuthProfile(session.token);
     } catch (error) {
       setStatus(`Customer page load failed: ${error.message}`);
     } finally {
@@ -267,11 +86,184 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path !== '/steam-callback') {
+      return;
+    }
+
+    const search = new URLSearchParams(window.location.search);
+    const tokenFromUrl = search.get('token');
+    const refreshFromUrl = search.get('refreshToken') || '';
+    const usernameFromUrl = search.get('username') || '';
+    const premiumFromUrl = boolFromString(search.get('premiumUser'), false);
+    const subscriptionFromUrl = search.get('subscriptionStatus') || 'none';
+
+    async function completeSteamCallback() {
+      if (!tokenFromUrl || !usernameFromUrl) {
+        setView('auth');
+        setStatus('Steam sign-in failed: missing callback data.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      session.saveSession(
+        {
+          token: tokenFromUrl,
+          refreshToken: refreshFromUrl,
+          premiumUser: premiumFromUrl,
+          subscriptionStatus: subscriptionFromUrl,
+          emailVerified: true,
+          accountSetupComplete: true,
+        },
+        usernameFromUrl,
+      );
+
+      try {
+        await session.loadAuthProfile(tokenFromUrl);
+      } catch {
+        // Keep the sign-in successful even if the profile refresh fails.
+      }
+
+      setView('dashboard');
+      setStatus(`Signed in with Steam as ${usernameFromUrl}.`);
+      window.history.replaceState({}, '', '/');
+    }
+
+    completeSteamCallback();
+  }, [session]);
+
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path !== '/discord-callback') {
+      return;
+    }
+
+    const search = new URLSearchParams(window.location.search);
+    const statusFromUrl = search.get('status');
+    const errorFromUrl = search.get('error');
+    const discordUsernameFromUrl = search.get('discordUsername') || '';
+
+    async function completeCallback() {
+      if (!session.token) {
+        setView('auth');
+        setStatus('Discord link failed: sign in first.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      if (errorFromUrl) {
+        setView('dashboard');
+        setStatus(`Discord link failed: ${errorFromUrl}`);
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      if (statusFromUrl !== 'discord_linked') {
+        setView('dashboard');
+        setStatus('Discord link failed: missing callback data.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        await session.loadAuthProfile(session.token);
+        setView('dashboard');
+        setStatus(
+          discordUsernameFromUrl
+            ? `Discord account linked successfully: ${discordUsernameFromUrl}.`
+            : 'Discord account linked successfully.',
+        );
+      } catch (error) {
+        setView('dashboard');
+        setStatus(`Discord link failed: ${error.message}`);
+      } finally {
+        setLoading(false);
+        window.history.replaceState({}, '', '/');
+      }
+    }
+
+    completeCallback();
+  }, [session]);
+
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    const checkout = search.get('checkout');
+    const subscription = search.get('subscription');
+    const checkoutSessionId = search.get('session_id');
+    if (!checkout && !subscription) {
+      return;
+    }
+
+    setView('shop');
+    if (checkout === 'success') {
+      setStatus('Payment completed. Stripe webhook will update your order status shortly.');
+    } else if (checkout === 'cancel') {
+      setStatus('Checkout canceled. No charge was made.');
+    } else if (subscription === 'success') {
+      setStatus('Subscription checkout completed. Premium status updates after webhook confirmation.');
+    } else if (subscription === 'cancel') {
+      setStatus('Subscription checkout canceled.');
+    }
+
+    async function syncIfNeeded() {
+      if (subscription !== 'success' || !checkoutSessionId || !session.token) {
+        return;
+      }
+
+      try {
+        await syncSubscriptionFromSession(session.token, checkoutSessionId);
+        await loadShopData();
+        setStatus('Subscription activated. Your account is now premium.');
+      } catch (error) {
+        setStatus(`Subscription checkout completed but sync failed: ${error.message}`);
+      }
+    }
+
+    syncIfNeeded();
+    window.history.replaceState({}, '', '/');
+  }, [session]);
+
+  async function startSteamSignIn() {
+    setLoading(true);
+    setStatus('Redirecting to Steam...');
+    try {
+      const url = await getSteamLoginUrl();
+      window.location.assign(url);
+    } catch (error) {
+      setStatus(`Steam sign-in failed: ${error.message}`);
+      setLoading(false);
+    }
+  }
+
+  async function startDiscordLink() {
+    if (!session.authenticated || !session.token) {
+      setView('auth');
+      setStatus('Sign in with Steam before linking Discord.');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('Redirecting to Discord...');
+    try {
+      const url = await getDiscordLinkUrl(session.token);
+      window.location.assign(url);
+    } catch (error) {
+      setStatus(`Discord link failed: ${error.message}`);
+      setLoading(false);
+    }
+  }
+
   async function handleBuy(productId) {
-    if (!authenticated || !token) {
+    if (!session.authenticated || !session.token) {
       setStatus('Please log in before purchasing.');
       setView('auth');
-      setMode('login');
+      return;
+    }
+
+    if (!session.accountSetupComplete) {
+      setStatus('Account not setup. Link your Steam account before buying.');
       return;
     }
 
@@ -280,15 +272,7 @@ export default function App() {
 
     try {
       const idempotencyKey = `checkout-${productId}-${Date.now()}`;
-      const response = await callJson('/shop/checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({ productId }),
-      });
+      const response = await createCheckoutSession(productId, session.token, idempotencyKey);
 
       if (!response?.checkoutUrl) {
         throw new Error('No checkout URL returned by backend');
@@ -296,13 +280,51 @@ export default function App() {
 
       window.location.assign(response.checkoutUrl);
     } catch (error) {
-      setStatus(`Checkout failed: ${error.message}`);
+      if (error.message === 'account_not_setup') {
+        setStatus('Account not setup. Link your Steam account before buying.');
+      } else {
+        setStatus(`Checkout failed: ${error.message}`);
+      }
+      setShopLoading(false);
+    }
+  }
+
+  async function handleStartSubscription() {
+    if (!session.authenticated || !session.token) {
+      setStatus('Please log in before subscribing.');
+      setView('auth');
+      return;
+    }
+
+    if (!session.accountSetupComplete) {
+      setStatus('Account not setup. Link your Steam account before subscribing.');
+      return;
+    }
+
+    setShopLoading(true);
+    setStatus('Creating Stripe subscription checkout session...');
+
+    try {
+      const idempotencyKey = `subscription-premium-${Date.now()}`;
+      const response = await createSubscriptionCheckoutSession(session.token, idempotencyKey);
+
+      if (!response?.checkoutUrl) {
+        throw new Error('No checkout URL returned by backend');
+      }
+
+      window.location.assign(response.checkoutUrl);
+    } catch (error) {
+      if (error.message === 'account_not_setup') {
+        setStatus('Account not setup. Link your Steam account before subscribing.');
+      } else {
+        setStatus(`Subscription checkout failed: ${error.message}`);
+      }
       setShopLoading(false);
     }
   }
 
   async function handleDownload(productId) {
-    if (!authenticated || !token) {
+    if (!session.authenticated || !session.token) {
       setStatus('Please log in before downloading.');
       setView('auth');
       return;
@@ -312,22 +334,7 @@ export default function App() {
     setStatus('Preparing your download...');
 
     try {
-      const response = await fetch(`${apiBase}/shop/download/${encodeURIComponent(productId)}`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || `Download failed (${response.status})`);
-      }
-
-      const blob = await response.blob();
-      const disposition = response.headers.get('content-disposition') || '';
-      const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i);
-      const fileName = fileNameMatch ? fileNameMatch[1] : `${productId}.zip`;
+      const { blob, fileName } = await downloadProductBlob(productId, session.token);
 
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -342,8 +349,8 @@ export default function App() {
     } catch (error) {
       if (error.message === 'purchase_required') {
         setStatus('Download failed: purchase this product first.');
-      } else if (error.message === 'email_not_verified') {
-        setStatus('Download failed: verify your email first.');
+      } else if (error.message === 'account_not_setup') {
+        setStatus('Download failed: link your Steam account first.');
       } else if (error.message === 'download_not_found') {
         setStatus('Download failed: file is not available yet.');
       } else {
@@ -354,52 +361,33 @@ export default function App() {
     }
   }
 
-  async function handleRegister(event) {
-    event.preventDefault();
-
-    if (!emailLooksValid) {
-      setStatus('Register failed: please enter a valid email address.');
+  async function handleCancelSubscription() {
+    if (!session.authenticated || !session.token) {
+      setStatus('Please log in before canceling subscription.');
       return;
     }
 
-    setLoading(true);
-    setStatus('Creating account and sending verification email...');
+    setShopLoading(true);
+    setStatus('Canceling your subscription...');
 
     try {
-      await authRequest('/auth/register', username, password, email, { expectToken: false });
-      setPassword('');
-      setAwaitingEmailVerification(true);
-      setStatus('Account created. Please verify your account, then log in.');
+      await cancelSubscription(session.token);
+      await loadShopData();
+      setStatus('Subscription will cancel at period end. Premium remains active until then.');
     } catch (error) {
-      setStatus(`Register failed: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleLogin(event) {
-    event.preventDefault();
-    setLoading(true);
-    setStatus('Signing in...');
-
-    try {
-      const nextToken = await authRequest('/auth/login', username, password);
-      saveSession(nextToken, username);
-      setStatus(`Signed in as ${username}.`);
-    } catch (error) {
-      if (error.message === 'email_not_verified') {
-        setStatus('Login failed: verify your email first, then try again.');
+      if (error.message === 'subscription_not_found') {
+        setStatus('No active subscription found.');
       } else {
-        setStatus(`Login failed: ${error.message}`);
+        setStatus(`Cancel subscription failed: ${error.message}`);
       }
     } finally {
-      setLoading(false);
+      setShopLoading(false);
     }
   }
 
   async function handleProtectedRequest(path) {
-    if (!authenticated) {
-      setStatus('Please log in first.');
+    if (!session.authenticated) {
+      setStatus('Please sign in with Steam first.');
       return;
     }
 
@@ -407,12 +395,16 @@ export default function App() {
     setStatus(`Calling ${path} with JWT...`);
 
     try {
-      const data = await callProtected(path, token);
+      const data = await callProtectedText(path, session.token);
       setProtectedData(data);
       setStatus(`Protected request to ${path} succeeded.`);
     } catch (error) {
       if (String(error.message).includes('401')) {
-        clearSession('Session is invalid or expired. Please sign in again.');
+        session.clearSession();
+        setProtectedData('No protected request made yet.');
+        setOrders([]);
+        setView('home');
+        setStatus('Session is invalid or expired. Please sign in again.');
       } else {
         setStatus(`Protected request failed: ${error.message}`);
       }
@@ -421,8 +413,15 @@ export default function App() {
     }
   }
 
-  function openAuth(nextMode) {
-    setMode(nextMode);
+  function signOut() {
+    session.clearSession();
+    setProtectedData('No protected request made yet.');
+    setOrders([]);
+    setView('home');
+    setStatus('Signed out.');
+  }
+
+  function openAuth() {
     setView('auth');
   }
 
@@ -436,10 +435,9 @@ export default function App() {
   }
 
   function openCustomer() {
-    if (!authenticated || !token) {
+    if (!session.authenticated || !session.token) {
       setStatus('Please log in to access customer downloads.');
       setView('auth');
-      setMode('login');
       return;
     }
 
@@ -447,260 +445,8 @@ export default function App() {
     loadCustomerData();
   }
 
-  function renderHome() {
-    return (
-      <section style={{ marginTop: '2.5rem' }}>
-        <h1 style={{ marginBottom: '0.5rem' }}>Welcome to OverKill Development</h1>
-        <p style={{ marginTop: 0, opacity: 0.85 }}>
-          Home page for visitors. Use the top-right actions to sign up or log in.
-        </p>
-      </section>
-    );
-  }
-
-  function renderAuth() {
-    if (awaitingEmailVerification) {
-      return (
-        <section style={{ marginTop: '2rem', maxWidth: 440 }}>
-          <h2 style={{ marginBottom: '0.25rem' }}>Verify Your Account</h2>
-          <p style={{ marginTop: 0, opacity: 0.85 }}>
-            Please verify your account and then log in.
-          </p>
-        </section>
-      );
-    }
-
-    return (
-      <section style={{ marginTop: '2rem', maxWidth: 440 }}>
-        <h2 style={{ marginBottom: '0.25rem' }}>{mode === 'signup' ? 'Create Account' : 'Login'}</h2>
-        <p style={{ marginTop: 0, opacity: 0.85 }}>
-          {mode === 'signup'
-            ? 'Create your user, verify your email, then log in to reach your dashboard.'
-            : 'Sign in with your account to access your dashboard.'}
-        </p>
-
-        <form style={{ display: 'grid', gap: '0.75rem' }} onSubmit={mode === 'signup' ? handleRegister : handleLogin}>
-          {mode === 'signup' && (
-            <>
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                required
-              />
-            </>
-          )}
-
-          <label htmlFor="username">Username</label>
-          <input
-            id="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
-            minLength={3}
-            required
-          />
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-            minLength={6}
-            required
-          />
-
-          <button
-            type="submit"
-            disabled={loading || !username || !password || (mode === 'signup' && !emailLooksValid)}
-          >
-            {mode === 'signup' ? 'Sign Up' : 'Log In'}
-          </button>
-        </form>
-
-        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.75rem' }}>
-          <button type="button" onClick={() => setMode('login')} disabled={loading || mode === 'login'}>
-            Switch to Login
-          </button>
-          <button type="button" onClick={() => setMode('signup')} disabled={loading || mode === 'signup'}>
-            Switch to Sign Up
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  function renderDashboard() {
-    return (
-      <section style={{ marginTop: '2rem' }}>
-        <h2 style={{ marginBottom: '0.25rem' }}>Customer Dashboard</h2>
-        <p style={{ marginTop: 0 }}>Signed in as <strong>{currentUser || 'user'}</strong></p>
-        <p style={{ marginTop: 0 }}>
-          Session ID: <strong>{sessionId || 'n/a'}</strong>
-        </p>
-
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <button type="button" disabled={loading || !authenticated} onClick={() => handleProtectedRequest('/hello')}>
-            Load /hello
-          </button>
-          <button type="button" disabled={loading || !authenticated} onClick={() => handleProtectedRequest('/test')}>
-            Load /test
-          </button>
-        </div>
-
-        <div style={{ marginTop: '1rem' }}>
-          <strong>API Response:</strong>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{protectedData}</pre>
-        </div>
-      </section>
-    );
-  }
-
-  function renderShop() {
-    return (
-      <section style={{ marginTop: '2rem' }}>
-        <h2 style={{ marginBottom: '0.25rem' }}>Shop</h2>
-        <p style={{ marginTop: 0, opacity: 0.85 }}>
-          Buy a package through Stripe Checkout. Orders are saved to your profile.
-        </p>
-
-        <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-          {products.map((product) => (
-            <article
-              key={product.id}
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: '0.75rem', maxWidth: 560 }}
-            >
-              <h3 style={{ margin: 0 }}>{product.name}</h3>
-              <p style={{ marginTop: '0.5rem' }}>{product.description}</p>
-              <p style={{ marginTop: '0.25rem' }}>
-                <strong>
-                  {(product.amountCents / 100).toFixed(2)} {String(product.currency || '').toUpperCase()}
-                </strong>
-              </p>
-              <button
-                type="button"
-                disabled={shopLoading}
-                onClick={() => handleBuy(product.id)}
-              >
-                Buy with Stripe
-              </button>
-            </article>
-          ))}
-          {!products.length && <p>No products configured.</p>}
-        </div>
-
-        {authenticated && (
-          <section style={{ marginTop: '1.5rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>Your Orders</h3>
-            {!orders.length && <p>No orders yet.</p>}
-            {orders.map((order) => (
-              <div key={order.id} style={{ marginBottom: '0.6rem' }}>
-                #{order.id} · {order.productName} · {order.status} · {(order.amountCents / 100).toFixed(2)}{' '}
-                {String(order.currency || '').toUpperCase()}
-                {order.status === 'PAID' && (
-                  <button
-                    type="button"
-                    style={{ marginLeft: '0.6rem' }}
-                    disabled={shopLoading}
-                    onClick={() => handleDownload(order.productId)}
-                  >
-                    Download
-                  </button>
-                )}
-              </div>
-            ))}
-          </section>
-        )}
-      </section>
-    );
-  }
-
-  function renderCustomer() {
-    return (
-      <section style={{ marginTop: '2rem' }}>
-        <h2 style={{ marginBottom: '0.25rem' }}>Customer Downloads</h2>
-        <p style={{ marginTop: 0, opacity: 0.85 }}>
-          Download products from your paid purchases.
-        </p>
-
-        {shopLoading && <p>Loading your purchases...</p>}
-
-        {!shopLoading && !paidOrders.length && (
-          <p>No downloadable purchases found yet.</p>
-        )}
-
-        <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-          {paidOrders.map((order) => (
-            <article
-              key={`${order.id}-${order.productId}`}
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: '0.75rem', maxWidth: 560 }}
-            >
-              <h3 style={{ margin: 0 }}>{order.productName}</h3>
-              <p style={{ marginTop: '0.5rem', marginBottom: '0.5rem', opacity: 0.85 }}>
-                Order #{order.id} · {(order.amountCents / 100).toFixed(2)} {String(order.currency || '').toUpperCase()}
-              </p>
-              <button
-                type="button"
-                disabled={shopLoading}
-                onClick={() => handleDownload(order.productId)}
-              >
-                Download
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  function renderTerms() {
-    return (
-      <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-        <h2 style={{ marginBottom: '0.5rem' }}>Terms of Service</h2>
-        <p>By purchasing from OverKill Development, you agree to these terms.</p>
-        <ul>
-          <li>Digital products are licensed, not sold.</li>
-          <li>Do not redistribute or resell purchased assets.</li>
-          <li>Account access may be suspended for abuse or fraud.</li>
-          <li>Prices, availability, and product details can change.</li>
-        </ul>
-      </section>
-    );
-  }
-
-  function renderPrivacy() {
-    return (
-      <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-        <h2 style={{ marginBottom: '0.5rem' }}>Privacy Policy</h2>
-        <p>OverKill Development collects only the data needed to provide accounts and purchases.</p>
-        <ul>
-          <li>We store account data (username, email, encrypted password).</li>
-          <li>Payment card data is handled by Stripe and never stored by OverKill Development.</li>
-          <li>Order, billing, and security logs are retained for fraud prevention and support.</li>
-          <li>You can request account deletion and data export by contacting support.</li>
-        </ul>
-      </section>
-    );
-  }
-
-  function renderRefund() {
-    return (
-      <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-        <h2 style={{ marginBottom: '0.5rem' }}>Refund Policy</h2>
-        <p>For digital products, refunds are handled under the rules below.</p>
-        <ul>
-          <li>Refund requests are accepted within 14 days of purchase.</li>
-          <li>Refunds are available for duplicate purchases or technical delivery failures.</li>
-          <li>No refunds for policy violations, abuse, or completed custom work.</li>
-          <li>Approved refunds are returned to the original payment method via Stripe.</li>
-        </ul>
-      </section>
-    );
+  if (view === 'tier-painter' && session.authenticated) {
+    return <TierPainterView token={session.token} onBack={() => setView('customer')} />;
   }
 
   return (
@@ -710,45 +456,91 @@ export default function App() {
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           <button type="button" onClick={openShop}>Shop</button>
-          {authenticated ? (
+          {session.authenticated ? (
             <>
               <button type="button" onClick={() => setView('dashboard')}>Dashboard</button>
               <button type="button" onClick={openCustomer}>Customer</button>
-              <button type="button" onClick={() => clearSession('Signed out.')}>Log Out</button>
+              <button type="button" onClick={signOut}>Log Out</button>
             </>
           ) : (
             <>
-              <button type="button" onClick={() => openAuth('login')}>Login</button>
-              <button type="button" onClick={() => openAuth('signup')}>Sign Up</button>
+              <button type="button" onClick={openAuth}>Sign In</button>
             </>
           )}
         </div>
       </header>
 
-      <section style={{ marginTop: '1rem' }}>
+      {/*
+        <section style={{ marginTop: '1rem' }}>
         <strong>Status:</strong> <span>{status}</span>
       </section>
+      */}
 
-      {view === 'home' && renderHome()}
-      {view === 'auth' && !authenticated && renderAuth()}
-      {view === 'dashboard' && authenticated && renderDashboard()}
-      {view === 'customer' && authenticated && renderCustomer()}
-      {view === 'shop' && renderShop()}
-      {view === 'terms' && renderTerms()}
-      {view === 'privacy' && renderPrivacy()}
-      {view === 'refund' && renderRefund()}
+      {view === 'home' && <HomeView />}
+      {view === 'auth' && !session.authenticated && (
+        <AuthView loading={loading} onStartSteamSignIn={startSteamSignIn} />
+      )}
+      {view === 'dashboard' && session.authenticated && (
+        <DashboardView
+          currentUser={session.currentUser}
+          sessionId={session.sessionId}
+          premiumUser={session.premiumUser}
+          subscriptionStatus={session.subscriptionStatus}
+          accountSetupComplete={session.accountSetupComplete}
+          emailVerified={session.emailVerified}
+          steam64Id={session.steam64Id}
+          discordUserId={session.discordUserId}
+          discordUsername={session.discordUsername}
+          loading={loading}
+          authenticated={session.authenticated}
+          protectedData={protectedData}
+          onStartDiscordLink={startDiscordLink}
+          onProtectedHello={() => handleProtectedRequest('/hello')}
+          onProtectedTest={() => handleProtectedRequest('/test')}
+        />
+      )}
+      {view === 'customer' && session.authenticated && (
+        <CustomerView
+          shopLoading={shopLoading}
+          paidOrders={paidOrders}
+          onDownload={handleDownload}
+          onOpenTools={() => setView('tier-painter')}
+        />
+      )}
+      {view === 'shop' && (
+        <ShopView
+          authenticated={session.authenticated}
+          accountSetupComplete={session.accountSetupComplete}
+          premiumUser={session.premiumUser}
+          subscriptionStatus={session.subscriptionStatus}
+          subscriptionId={session.subscriptionId}
+          subscriptionCancelAtPeriodEnd={session.subscriptionCancelAtPeriodEnd}
+          subscriptionCurrentPeriodEnd={session.subscriptionCurrentPeriodEnd}
+          subscriptionCancelAt={session.subscriptionCancelAt}
+          shopLoading={shopLoading}
+          products={products}
+          orders={orders}
+          onStartSubscription={handleStartSubscription}
+          onCancelSubscription={handleCancelSubscription}
+          onBuy={handleBuy}
+          onDownload={handleDownload}
+        />
+      )}
+      {view === 'terms' && <TermsView />}
+      {view === 'privacy' && <PrivacyView />}
+      {view === 'refund' && <RefundView />}
 
-      {view === 'dashboard' && !authenticated && (
+      {view === 'dashboard' && !session.authenticated && (
         <section style={{ marginTop: '1.5rem' }}>
-          <p>Please log in to access the dashboard.</p>
-          <button type="button" onClick={() => openAuth('login')}>Go to Login</button>
+          <p>Please sign in with Steam to access the dashboard.</p>
+          <button type="button" onClick={openAuth}>Go to Sign In</button>
         </section>
       )}
 
-      {view === 'customer' && !authenticated && (
+      {view === 'customer' && !session.authenticated && (
         <section style={{ marginTop: '1.5rem' }}>
-          <p>Please log in to access customer downloads.</p>
-          <button type="button" onClick={() => openAuth('login')}>Go to Login</button>
+          <p>Please sign in with Steam to access customer downloads.</p>
+          <button type="button" onClick={openAuth}>Go to Sign In</button>
         </section>
       )}
 

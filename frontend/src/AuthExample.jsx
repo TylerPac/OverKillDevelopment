@@ -1,58 +1,47 @@
 import { useState } from 'react';
 
-const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 'http://localhost:8080';
+const baseUrl =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
+  'http://localhost:8080';
 
 export default function AuthExample() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  async function post(path, body) {
+  async function get(path) {
     const res = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method: 'GET',
     });
-    return res.json();
+
+    const contentType = res.headers.get('content-type') || '';
+    const body = contentType.includes('application/json') ? await res.json() : await res.text();
+    if (!res.ok) {
+      const messageText = typeof body === 'string' ? body : body?.message || 'Request failed';
+      throw new Error(messageText);
+    }
+
+    return body;
   }
 
-  async function handleRegister(e) {
+  async function handleSteamSignIn(e) {
     e.preventDefault();
     try {
-      const data = await post('/auth/register', { username, password });
-      if (data.token) {
-        localStorage.setItem('token', data.token);
-        setMessage('Registered and logged in. Token saved.');
-      } else setMessage(JSON.stringify(data));
-    } catch (err) { setMessage(String(err)); }
-  }
-
-  async function handleLogin(e) {
-    e.preventDefault();
-    try {
-      const data = await post('/auth/login', { username, password });
-      if (data.token) {
-        localStorage.setItem('token', data.token);
-        setMessage('Logged in. Token saved.');
-      } else setMessage(JSON.stringify(data));
-    } catch (err) { setMessage(String(err)); }
+      const data = await get('/auth/steam/login-url');
+      if (!data?.url) {
+        throw new Error('Steam login URL was not returned by backend');
+      }
+      window.location.assign(data.url);
+    } catch (err) {
+      setMessage(String(err));
+    }
   }
 
   return (
     <div style={{maxWidth:400}}>
       <h3>Auth Example</h3>
-      <form onSubmit={handleLogin}>
-        <div>
-          <label>Username</label>
-          <input value={username} onChange={e=>setUsername(e.target.value)} />
-        </div>
-        <div>
-          <label>Password</label>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-        </div>
+      <form onSubmit={handleSteamSignIn}>
+        <p>Start the Steam OpenID sign-in flow.</p>
         <div style={{marginTop:8}}>
-          <button onClick={handleRegister}>Register</button>
-          <button type="submit" style={{marginLeft:8}}>Login</button>
+          <button type="submit">Continue with Steam</button>
         </div>
       </form>
       <div style={{marginTop:12}}><strong>Status:</strong> {message}</div>

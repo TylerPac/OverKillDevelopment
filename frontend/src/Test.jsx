@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react'
 import './Hello.css'
 
+const apiBase =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
+  'http://localhost:8080'
+
 function Test() {
   const [textVariable, settextVariable] = useState('Loading...')
 
   useEffect(() => {
-    fetch('http://localhost:8081/test')
+    fetch(`${apiBase}/test`)
       // This is where the error is occurring. 
       // The response from the backend is not being properly handled, which is causing the frontend to fail to load the message.
       .then((res) => res.text())

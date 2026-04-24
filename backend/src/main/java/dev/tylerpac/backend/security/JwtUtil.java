@@ -17,15 +17,15 @@ public class JwtUtil {
     private final Key key;
 
     public JwtUtil(
-        @Value("${SPRING_JWT_SECRET:}") String secret,
+        @Value("${JWT_SECRET:${SPRING_JWT_SECRET:}}") String secret,
         @Value("${app.security.allow-weak-jwt-secret:false}") boolean allowWeakJwtSecret
     ) {
         if (secret == null || secret.isBlank()) {
-            throw new IllegalStateException("SPRING_JWT_SECRET is required.");
+            throw new IllegalStateException("JWT_SECRET is required.");
         }
 
         if (!allowWeakJwtSecret && (secret.length() < 32 || secret.contains("change_me"))) {
-            throw new IllegalStateException("SPRING_JWT_SECRET must be at least 32 chars and not use placeholder values.");
+            throw new IllegalStateException("JWT_SECRET must be at least 32 chars and not use placeholder values.");
         }
 
         byte[] keyBytes = secret.getBytes();

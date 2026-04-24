@@ -5,17 +5,11 @@ import java.util.Optional;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.AuthenticationProvider;
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -41,28 +35,10 @@ public class SecurityConfig {
             if (u.isEmpty()) throw new UsernameNotFoundException("User not found");
             User user = u.get();
             return org.springframework.security.core.userdetails.User.withUsername(user.getUsername())
-                    .password(user.getPassword())
-                    .disabled(!user.isEmailVerified())
+                    .password("{noop}oauth")
                     .authorities("USER")
                     .build();
         };
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
-    @Bean
-    public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService());
-        provider.setPasswordEncoder(passwordEncoder());
-        return provider;
-    }
-
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
     }
 
     @Bean
@@ -72,10 +48,9 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**", "/actuator/**", "/shop/webhook", "/shop/products").permitAll()
+                .requestMatchers("/auth/**", "/api/google/**", "/actuator/**", "/shop/webhook", "/shop/products").permitAll()
                 .anyRequest().authenticated()
             )
-            .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
@@ -90,6 +65,16 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
+        // Allow Google OAuth redirects (origin may be https://accounts.google.com)
+        CorsConfiguration googleConfig = new CorsConfiguration();
+        googleConfig.setAllowedOrigins(List.of("https://accounts.google.com"));
+        googleConfig.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        googleConfig.setAllowedHeaders(List.of("*"));
+        // Do not send credentials for Google redirects
+        googleConfig.setAllowCredentials(false);
+        source.registerCorsConfiguration("/api/google/**", googleConfig);
+
         return source;
     }
 }

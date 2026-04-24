@@ -22,10 +22,12 @@ import com.stripe.model.Event;
 import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.StripeObject;
+import com.stripe.model.Subscription;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.RequestOptions;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
+import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
@@ -41,6 +43,7 @@ import dev.tylerpac.backend.repo.UserRepository;
 @Service
 public class StripeShopService {
 
+    private static final String DEFAULT_FRONTEND_URL = "http://localhost:5173";
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_PAID = "PAID";
     private static final String STATUS_FAILED = "FAILED";
@@ -54,6 +57,7 @@ public class StripeShopService {
     private final String successUrl;
     private final String cancelUrl;
     private final String webhookSecret;
+    private final String premiumPriceId;
 
     public StripeShopService(
         ShopOrderRepository shopOrderRepository,
@@ -64,16 +68,18 @@ public class StripeShopService {
         @Value("${app.shop.success-url}") String successUrl,
         @Value("${app.shop.cancel-url}") String cancelUrl,
         @Value("${app.stripe.secret-key:}") String stripeSecretKey,
-        @Value("${app.stripe.webhook-secret:}") String webhookSecret
+        @Value("${app.stripe.webhook-secret:}") String webhookSecret,
+        @Value("${app.stripe.premium-price-id:}") String premiumPriceId
     ) {
         this.shopOrderRepository = shopOrderRepository;
         this.processedStripeEventRepository = processedStripeEventRepository;
         this.purchaseEmailService = purchaseEmailService;
         this.userRepository = userRepository;
         this.currency = currency;
-        this.successUrl = successUrl;
-        this.cancelUrl = cancelUrl;
+        this.successUrl = normalizeCheckoutBaseUrl(successUrl);
+        this.cancelUrl = normalizeCheckoutBaseUrl(cancelUrl);
         this.webhookSecret = webhookSecret;
+        this.premiumPriceId = premiumPriceId;
 
         if (!StringUtils.hasText(stripeSecretKey)) {
             throw new IllegalStateException("Stripe secret key is missing. Set APP_STRIPE_SECRET_KEY.");
@@ -81,8 +87,104 @@ public class StripeShopService {
         Stripe.apiKey = stripeSecretKey;
     }
 
+    private String normalizeCheckoutBaseUrl(String configuredUrl) {
+        if (!StringUtils.hasText(configuredUrl)) {
+            return DEFAULT_FRONTEND_URL;
+        }
+
+        String candidate = configuredUrl.trim();
+        if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+            return candidate;
+        }
+
+        return DEFAULT_FRONTEND_URL;
+    }
+
     public List<ShopProductResponse> getProducts() {
         return List.copyOf(catalog().values());
+    }
+
+    @Transactional
+    public CreateCheckoutSessionResponse createSubscriptionCheckoutSession(User user, String idempotencyKey) throws StripeException {
+        if (!StringUtils.hasText(premiumPriceId)) {
+            throw new IllegalStateException("Stripe premium subscription price id is missing. Set APP_STRIPE_PREMIUM_PRICE_ID.");
+        }
+        if (!premiumPriceId.startsWith("price_")) {
+            throw new IllegalStateException("APP_STRIPE_PREMIUM_PRICE_ID must be a Stripe Price ID (price_...), not a Product ID (prod_...).");
+        }
+
+        String scopedIdempotencyKey = normalizeSubscriptionIdempotencyKey(user, idempotencyKey);
+        String customerId = ensureStripeCustomer(user);
+
+        SessionCreateParams params = SessionCreateParams.builder()
+            .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
+            .setCustomer(customerId)
+            .setSuccessUrl(successUrl + "?subscription=success&session_id={CHECKOUT_SESSION_ID}")
+            .setCancelUrl(cancelUrl + "?subscription=cancel")
+            .setClientReferenceId(String.valueOf(user.getId()))
+            .putMetadata("userId", String.valueOf(user.getId()))
+            .putMetadata("subscriptionType", "premium")
+            .addLineItem(
+                SessionCreateParams.LineItem.builder()
+                    .setQuantity(1L)
+                    .setPrice(premiumPriceId)
+                    .build()
+            )
+            .build();
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey(StringUtils.hasText(scopedIdempotencyKey) ? scopedIdempotencyKey : UUID.randomUUID().toString())
+            .build();
+
+        Session session = Session.create(params, requestOptions);
+        return new CreateCheckoutSessionResponse(session.getUrl(), session.getId());
+    }
+
+    @Transactional
+    public void syncSubscriptionStatusFromSession(User user, String sessionId) throws StripeException {
+        if (!StringUtils.hasText(sessionId)) {
+            throw new IllegalArgumentException("session_id_required");
+        }
+
+        Session session = Session.retrieve(sessionId.trim());
+        if (!"subscription".equalsIgnoreCase(session.getMode())) {
+            throw new IllegalArgumentException("invalid_subscription_session");
+        }
+
+        String customerId = String.valueOf(session.getCustomer());
+        if (!StringUtils.hasText(customerId) || "null".equals(customerId)) {
+            throw new IllegalArgumentException("invalid_subscription_session");
+        }
+
+        if (!StringUtils.hasText(user.getStripeCustomerId())) {
+            user.setStripeCustomerId(customerId);
+            userRepository.save(user);
+        } else if (!customerId.equals(user.getStripeCustomerId())) {
+            throw new IllegalArgumentException("session_user_mismatch");
+        }
+
+        String subscriptionId = String.valueOf(session.getSubscription());
+        if (!StringUtils.hasText(subscriptionId) || "null".equals(subscriptionId)) {
+            return;
+        }
+
+        Subscription subscription = Subscription.retrieve(subscriptionId);
+        updateUserSubscriptionFromSubscriptionEvent(subscription);
+    }
+
+    @Transactional
+    public void cancelSubscription(User user) throws StripeException {
+        if (!StringUtils.hasText(user.getStripeSubscriptionId())) {
+            throw new IllegalArgumentException("subscription_not_found");
+        }
+
+        Subscription subscription = Subscription.retrieve(user.getStripeSubscriptionId());
+        Subscription updatedSubscription = subscription.update(
+            SubscriptionUpdateParams.builder()
+                .setCancelAtPeriodEnd(true)
+                .build()
+        );
+        updateUserSubscriptionFromSubscriptionEvent(updatedSubscription);
     }
 
     @Transactional
@@ -185,6 +287,9 @@ public class StripeShopService {
             switch (eventType) {
                 case "checkout.session.completed" -> {
                     if (stripeObject.get() instanceof Session session) {
+                        if ("subscription".equalsIgnoreCase(session.getMode())) {
+                            updateUserSubscriptionFromCheckoutSession(session);
+                        }
                         updateOrderFromCheckoutSession(session, STATUS_PAID);
                     }
                 }
@@ -205,6 +310,11 @@ public class StripeShopService {
                             Optional<ShopOrder> orderOpt = shopOrderRepository.findByStripePaymentIntentId(paymentIntentId);
                             orderOpt.ifPresent(order -> markStatus(order, STATUS_FAILED));
                         }
+                    }
+                }
+                case "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted" -> {
+                    if (stripeObject.get() instanceof Subscription subscription) {
+                        updateUserSubscriptionFromSubscriptionEvent(subscription);
                     }
                 }
                 default -> {
@@ -293,6 +403,76 @@ public class StripeShopService {
         return "checkout:" + user.getId() + ":" + idempotencyKey.trim();
     }
 
+    private String normalizeSubscriptionIdempotencyKey(User user, String idempotencyKey) {
+        if (!StringUtils.hasText(idempotencyKey)) {
+            return null;
+        }
+        return "subscription:" + user.getId() + ":" + idempotencyKey.trim();
+    }
+
+    @Transactional
+    protected void updateUserSubscriptionFromCheckoutSession(Session session) {
+        String customerId = String.valueOf(session.getCustomer());
+        if (!StringUtils.hasText(customerId) || "null".equals(customerId)) {
+            return;
+        }
+
+        Optional<User> userOpt = userRepository.findByStripeCustomerId(customerId);
+        if (userOpt.isEmpty()) {
+            return;
+        }
+
+        String subscriptionId = String.valueOf(session.getSubscription());
+        if (StringUtils.hasText(subscriptionId) && !"null".equals(subscriptionId)) {
+            User user = userOpt.get();
+            user.setStripeSubscriptionId(subscriptionId);
+            user.setStripeSubscriptionStatus("active");
+            user.setStripeSubscriptionCancelAtPeriodEnd(false);
+            user.setStripeSubscriptionCancelAt(null);
+            user.setPremiumUser(true);
+            userRepository.save(user);
+        }
+    }
+
+    @Transactional
+    protected void updateUserSubscriptionFromSubscriptionEvent(Subscription subscription) {
+        String customerId = String.valueOf(subscription.getCustomer());
+        if (!StringUtils.hasText(customerId) || "null".equals(customerId)) {
+            return;
+        }
+
+        Optional<User> userOpt = userRepository.findByStripeCustomerId(customerId);
+        if (userOpt.isEmpty()) {
+            return;
+        }
+
+        User user = userOpt.get();
+        String status = subscription.getStatus();
+        Instant now = Instant.now();
+        boolean cancelAtPeriodEnd = Boolean.TRUE.equals(subscription.getCancelAtPeriodEnd());
+        Instant cancelAt = stripeEpochToInstant(subscription.getCancelAt());
+        Instant currentPeriodEnd = stripeEpochToInstant(subscription.getCurrentPeriodEnd());
+        boolean premium = "active".equalsIgnoreCase(status)
+            || "trialing".equalsIgnoreCase(status)
+            || "past_due".equalsIgnoreCase(status)
+            || (cancelAtPeriodEnd && currentPeriodEnd != null && currentPeriodEnd.isAfter(now));
+
+        user.setStripeSubscriptionId(subscription.getId());
+        user.setStripeSubscriptionStatus(status);
+        user.setStripeSubscriptionCancelAtPeriodEnd(cancelAtPeriodEnd);
+        user.setStripeSubscriptionCancelAt(cancelAt);
+        user.setStripeSubscriptionCurrentPeriodEnd(currentPeriodEnd);
+        user.setPremiumUser(premium);
+        userRepository.save(user);
+    }
+
+    private Instant stripeEpochToInstant(Long epochSeconds) {
+        if (epochSeconds == null) {
+            return null;
+        }
+        return Instant.ofEpochSecond(epochSeconds);
+    }
+
     @Transactional
     protected String ensureStripeCustomer(User user) throws StripeException {
         if (StringUtils.hasText(user.getStripeCustomerId())) {
@@ -332,21 +512,21 @@ public class StripeShopService {
             "keycard-crates",
             "KeyCard Crates",
             "Keycard and Dynamic Crate Mod for DayZ",
-            10000,
+            40000,
             currency
         ));
-        products.put("pro-pack", new ShopProductResponse(
-            "pro-pack",
-            "Pro hello",
+        products.put("weapon-system", new ShopProductResponse(
+            "weapon-system",
+            "Weapon System",
             "Expanded assets + premium templates",
-            4900,
+            40000,
             currency
         ));
-        products.put("studio-pack", new ShopProductResponse(
-            "studio-pack",
-            "Studio Pack",
+        products.put("battle-pass", new ShopProductResponse(
+            "battle-pass",
+            "Battle Pass",
             "Full bundle with lifetime updates",
-            9900,
+            40000,
             currency
         ));
         return products;

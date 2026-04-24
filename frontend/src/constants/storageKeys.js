@@ -1,0 +1,14 @@
+export const TOKEN_KEY = 'overkilldevelopment_jwt_token';
+export const REFRESH_TOKEN_KEY = 'overkilldevelopment_refresh_token';
+export const USER_KEY = 'overkilldevelopment_username';
+export const STEAM64_KEY = 'overkilldevelopment_steam64_id';
+export const DISCORD_USER_ID_KEY = 'overkilldevelopment_discord_user_id';
+export const DISCORD_USERNAME_KEY = 'overkilldevelopment_discord_username';
+export const PREMIUM_KEY = 'overkilldevelopment_premium_user';
+export const SUBSCRIPTION_STATUS_KEY = 'overkilldevelopment_subscription_status';
+export const SUBSCRIPTION_ID_KEY = 'overkilldevelopment_subscription_id';
+export const SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY = 'overkilldevelopment_subscription_cancel_at_period_end';
+export const SUBSCRIPTION_CANCEL_AT_KEY = 'overkilldevelopment_subscription_cancel_at';
+export const SUBSCRIPTION_CURRENT_PERIOD_END_KEY = 'overkilldevelopment_subscription_current_period_end';
+export const ACCOUNT_SETUP_KEY = 'overkilldevelopment_account_setup_complete';
+export const EMAIL_VERIFIED_KEY = 'overkilldevelopment_email_verified';

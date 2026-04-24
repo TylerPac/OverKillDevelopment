@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react'
 import './Hello.css'
 
+const apiBase =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
+  'http://localhost:8080'
+
 function Hello() {
   const [message, setMessage] = useState('Loading...')
 
   useEffect(() => {
-    fetch('http://localhost:8081/hello')
+    fetch(`${apiBase}/hello`)
       .then((res) => res.text())
       .then((text) => setMessage(text))
       .catch(() => setMessage('Failed to load'))

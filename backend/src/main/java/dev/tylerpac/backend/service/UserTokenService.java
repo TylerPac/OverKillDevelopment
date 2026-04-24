@@ -61,18 +61,6 @@ public class UserTokenService {
         return Optional.of(token.getUser());
     }
 
-    @Transactional(readOnly = true)
-    public boolean isAlreadyVerifiedFromToken(String rawToken) {
-        String hash = hashToken(rawToken);
-        Optional<UserToken> tokenOpt = userTokenRepository.findByTokenHashAndPurpose(hash, UserTokenPurpose.EMAIL_VERIFICATION);
-        if (tokenOpt.isEmpty()) {
-            return false;
-        }
-
-        UserToken token = tokenOpt.get();
-        return token.getUsedAt() != null && token.getUser().isEmailVerified();
-    }
-
     @Transactional
     public void revokeForUser(User user, UserTokenPurpose purpose) {
         userTokenRepository.deleteByUserAndPurpose(user, purpose);
