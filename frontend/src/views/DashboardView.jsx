@@ -1,8 +1,6 @@
 export default function DashboardView({
   currentUser,
   sessionId,
-  premiumUser,
-  subscriptionStatus,
   accountSetupComplete,
   emailVerified,
   steam64Id,
@@ -16,11 +14,9 @@ export default function DashboardView({
   onProtectedTest,
 }) {
   return (
-    <section style={{ marginTop: '2rem' }}>
-      {/*
-      <h2 style={{ marginBottom: '0.25rem' }}>Customer Dashboard</h2>
-      */}
-      <p style={{ marginTop: 0 }}>Signed in as <strong>{currentUser || 'user'}</strong></p>
+    <section style={{ marginTop: '1rem' }}>
+      <h2>Dashboard</h2>
+      <p style={{ color: '#aaa', marginBottom: '1rem' }}>Signed in as <strong style={{ color: '#eee' }}>{currentUser || 'user'}</strong></p>
       
       {/*
       <p style={{ marginTop: 0 }}>
@@ -39,8 +35,8 @@ export default function DashboardView({
         Steam64 ID: <strong>{steam64Id || 'not linked'}</strong>
       </p>
       */}
-      <p style={{ marginTop: 0 }}>
-        Discord: <strong>{discordUserId ? `${discordUsername}` : 'not linked'}</strong>
+      <p style={{ color: '#aaa', marginBottom: '1rem' }}>
+        Discord: <strong style={{ color: '#eee' }}>{discordUserId ? discordUsername : 'not linked'}</strong>
         {
         /*
         Discord: <strong>{discordUserId ? `${discordUsername} (${discordUserId})` : 'not linked'}</strong>
@@ -48,7 +44,7 @@ export default function DashboardView({
         }
       </p>
 
-      <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+      <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <button type="button" disabled={loading || !authenticated} onClick={onStartDiscordLink}>
           {discordUserId ? 'Re-link Discord' : 'Link Discord'}
         </button>

@@ -4,14 +4,8 @@ import {
   DISCORD_USER_ID_KEY,
   DISCORD_USERNAME_KEY,
   EMAIL_VERIFIED_KEY,
-  PREMIUM_KEY,
   REFRESH_TOKEN_KEY,
   STEAM64_KEY,
-  SUBSCRIPTION_CANCEL_AT_KEY,
-  SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY,
-  SUBSCRIPTION_CURRENT_PERIOD_END_KEY,
-  SUBSCRIPTION_ID_KEY,
-  SUBSCRIPTION_STATUS_KEY,
   TOKEN_KEY,
   USER_KEY,
 } from '../constants/storageKeys';
@@ -24,16 +18,6 @@ export default function useSessionState(onSessionExpired) {
   const [steam64Id, setSteam64Id] = useState(() => localStorage.getItem(STEAM64_KEY) || '');
   const [discordUserId, setDiscordUserId] = useState(() => localStorage.getItem(DISCORD_USER_ID_KEY) || '');
   const [discordUsername, setDiscordUsername] = useState(() => localStorage.getItem(DISCORD_USERNAME_KEY) || '');
-  const [premiumUser, setPremiumUser] = useState(() => localStorage.getItem(PREMIUM_KEY) === 'true');
-  const [subscriptionStatus, setSubscriptionStatus] = useState(() => localStorage.getItem(SUBSCRIPTION_STATUS_KEY) || 'none');
-  const [subscriptionId, setSubscriptionId] = useState(() => localStorage.getItem(SUBSCRIPTION_ID_KEY) || '');
-  const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(
-    () => localStorage.getItem(SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY) === 'true',
-  );
-  const [subscriptionCancelAt, setSubscriptionCancelAt] = useState(() => localStorage.getItem(SUBSCRIPTION_CANCEL_AT_KEY) || '');
-  const [subscriptionCurrentPeriodEnd, setSubscriptionCurrentPeriodEnd] = useState(
-    () => localStorage.getItem(SUBSCRIPTION_CURRENT_PERIOD_END_KEY) || '',
-  );
   const [accountSetupComplete, setAccountSetupComplete] = useState(() => localStorage.getItem(ACCOUNT_SETUP_KEY) === 'true');
   const [emailVerified, setEmailVerified] = useState(() => localStorage.getItem(EMAIL_VERIFIED_KEY) === 'true');
 
@@ -53,12 +37,6 @@ export default function useSessionState(onSessionExpired) {
     const onStorage = () => {
       setToken(localStorage.getItem(TOKEN_KEY) || '');
       setCurrentUser(localStorage.getItem(USER_KEY) || '');
-      setPremiumUser(localStorage.getItem(PREMIUM_KEY) === 'true');
-      setSubscriptionStatus(localStorage.getItem(SUBSCRIPTION_STATUS_KEY) || 'none');
-      setSubscriptionId(localStorage.getItem(SUBSCRIPTION_ID_KEY) || '');
-      setSubscriptionCancelAtPeriodEnd(localStorage.getItem(SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY) === 'true');
-      setSubscriptionCancelAt(localStorage.getItem(SUBSCRIPTION_CANCEL_AT_KEY) || '');
-      setSubscriptionCurrentPeriodEnd(localStorage.getItem(SUBSCRIPTION_CURRENT_PERIOD_END_KEY) || '');
       setAccountSetupComplete(localStorage.getItem(ACCOUNT_SETUP_KEY) === 'true');
       setEmailVerified(localStorage.getItem(EMAIL_VERIFIED_KEY) === 'true');
     };
@@ -70,35 +48,17 @@ export default function useSessionState(onSessionExpired) {
   function saveSession(authPayload, nextUser) {
     const nextToken = authPayload?.token || '';
     const nextRefreshToken = authPayload?.refreshToken || '';
-    const nextPremium = Boolean(authPayload?.premiumUser);
-    const nextSubscriptionStatus = authPayload?.subscriptionStatus || 'none';
-    const nextSubscriptionId = authPayload?.stripeSubscriptionId || '';
-    const nextCancelAtPeriodEnd = Boolean(authPayload?.cancelAtPeriodEnd);
-    const nextCancelAt = authPayload?.cancelAt || '';
-    const nextCurrentPeriodEnd = authPayload?.currentPeriodEnd || '';
     const nextEmailVerified = Boolean(authPayload?.emailVerified);
     const nextAccountSetupComplete = Boolean(authPayload?.accountSetupComplete);
 
     localStorage.setItem(TOKEN_KEY, nextToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
     localStorage.setItem(USER_KEY, nextUser);
-    localStorage.setItem(PREMIUM_KEY, String(nextPremium));
-    localStorage.setItem(SUBSCRIPTION_STATUS_KEY, nextSubscriptionStatus);
-    localStorage.setItem(SUBSCRIPTION_ID_KEY, nextSubscriptionId);
-    localStorage.setItem(SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY, String(nextCancelAtPeriodEnd));
-    localStorage.setItem(SUBSCRIPTION_CANCEL_AT_KEY, nextCancelAt);
-    localStorage.setItem(SUBSCRIPTION_CURRENT_PERIOD_END_KEY, nextCurrentPeriodEnd);
     localStorage.setItem(EMAIL_VERIFIED_KEY, String(nextEmailVerified));
     localStorage.setItem(ACCOUNT_SETUP_KEY, String(nextAccountSetupComplete));
 
     setToken(nextToken);
     setCurrentUser(nextUser);
-    setPremiumUser(nextPremium);
-    setSubscriptionStatus(nextSubscriptionStatus);
-    setSubscriptionId(nextSubscriptionId);
-    setSubscriptionCancelAtPeriodEnd(nextCancelAtPeriodEnd);
-    setSubscriptionCancelAt(nextCancelAt);
-    setSubscriptionCurrentPeriodEnd(nextCurrentPeriodEnd);
     setEmailVerified(nextEmailVerified);
     setAccountSetupComplete(nextAccountSetupComplete);
   }
@@ -110,12 +70,6 @@ export default function useSessionState(onSessionExpired) {
     localStorage.removeItem(STEAM64_KEY);
     localStorage.removeItem(DISCORD_USER_ID_KEY);
     localStorage.removeItem(DISCORD_USERNAME_KEY);
-    localStorage.removeItem(PREMIUM_KEY);
-    localStorage.removeItem(SUBSCRIPTION_STATUS_KEY);
-    localStorage.removeItem(SUBSCRIPTION_ID_KEY);
-    localStorage.removeItem(SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY);
-    localStorage.removeItem(SUBSCRIPTION_CANCEL_AT_KEY);
-    localStorage.removeItem(SUBSCRIPTION_CURRENT_PERIOD_END_KEY);
     localStorage.removeItem(EMAIL_VERIFIED_KEY);
     localStorage.removeItem(ACCOUNT_SETUP_KEY);
 
@@ -124,12 +78,6 @@ export default function useSessionState(onSessionExpired) {
     setSteam64Id('');
     setDiscordUserId('');
     setDiscordUsername('');
-    setPremiumUser(false);
-    setSubscriptionStatus('none');
-    setSubscriptionId('');
-    setSubscriptionCancelAtPeriodEnd(false);
-    setSubscriptionCancelAt('');
-    setSubscriptionCurrentPeriodEnd('');
     setEmailVerified(false);
     setAccountSetupComplete(false);
   }
@@ -156,47 +104,12 @@ export default function useSessionState(onSessionExpired) {
     localStorage.setItem(DISCORD_USERNAME_KEY, nextDiscordUsername);
   }
 
-  function applySubscriptionState(nextSubscription) {
-    const nextPremium = Boolean(nextSubscription?.premiumUser);
-    const nextSubscriptionStatus = nextSubscription?.subscriptionStatus || 'none';
-    const nextSubscriptionId = nextSubscription?.stripeSubscriptionId || '';
-    const nextCancelAtPeriodEnd = Boolean(nextSubscription?.cancelAtPeriodEnd);
-    const nextCancelAt = nextSubscription?.cancelAt || '';
-    const nextCurrentPeriodEnd = nextSubscription?.currentPeriodEnd || '';
-    const nextAccountSetupComplete = Boolean(nextSubscription?.accountSetupComplete ?? accountSetupComplete);
-    const nextEmailVerified = Boolean(nextSubscription?.emailVerified ?? emailVerified);
-
-    setPremiumUser(nextPremium);
-    setSubscriptionStatus(nextSubscriptionStatus);
-    setSubscriptionId(nextSubscriptionId);
-    setSubscriptionCancelAtPeriodEnd(nextCancelAtPeriodEnd);
-    setSubscriptionCancelAt(nextCancelAt);
-    setSubscriptionCurrentPeriodEnd(nextCurrentPeriodEnd);
-    setAccountSetupComplete(nextAccountSetupComplete);
-    setEmailVerified(nextEmailVerified);
-
-    localStorage.setItem(PREMIUM_KEY, String(nextPremium));
-    localStorage.setItem(SUBSCRIPTION_STATUS_KEY, nextSubscriptionStatus);
-    localStorage.setItem(SUBSCRIPTION_ID_KEY, nextSubscriptionId);
-    localStorage.setItem(SUBSCRIPTION_CANCEL_AT_PERIOD_END_KEY, String(nextCancelAtPeriodEnd));
-    localStorage.setItem(SUBSCRIPTION_CANCEL_AT_KEY, nextCancelAt);
-    localStorage.setItem(SUBSCRIPTION_CURRENT_PERIOD_END_KEY, nextCurrentPeriodEnd);
-    localStorage.setItem(ACCOUNT_SETUP_KEY, String(nextAccountSetupComplete));
-    localStorage.setItem(EMAIL_VERIFIED_KEY, String(nextEmailVerified));
-  }
-
   return {
     token,
     currentUser,
     steam64Id,
     discordUserId,
     discordUsername,
-    premiumUser,
-    subscriptionStatus,
-    subscriptionId,
-    subscriptionCancelAtPeriodEnd,
-    subscriptionCancelAt,
-    subscriptionCurrentPeriodEnd,
     accountSetupComplete,
     emailVerified,
     authenticated,
@@ -205,6 +118,5 @@ export default function useSessionState(onSessionExpired) {
     saveSession,
     clearSession,
     loadAuthProfile,
-    applySubscriptionState,
   };
 }

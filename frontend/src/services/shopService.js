@@ -32,6 +32,18 @@ export function createCheckoutSession(productId, token, idempotencyKey) {
   });
 }
 
+export function createCartCheckoutSession(productIds, token, idempotencyKey) {
+  return callJson('/shop/cart-checkout-session', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ productIds }),
+  });
+}
+
 export function createSubscriptionCheckoutSession(token, idempotencyKey) {
   return callJson('/shop/subscription/checkout-session', {
     method: 'POST',

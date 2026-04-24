@@ -1,12 +1,24 @@
 export default function AuthView({ loading, onStartSteamSignIn }) {
   return (
-    <section style={{ marginTop: '2rem', maxWidth: 440 }}>
-      <h2 style={{ marginBottom: '0.25rem' }}>Sign In</h2>
-      <p style={{ marginTop: 0, opacity: 0.85 }}>
-        Use Steam OpenID to sign in. After sign-in, you can optionally link Discord from your dashboard.
+    <section style={{
+      maxWidth: 420,
+      background: '#1e1e2e',
+      border: '1px solid #333',
+      borderRadius: 8,
+      padding: '1.5rem',
+      marginTop: '2rem',
+    }}>
+      <h2>Sign In</h2>
+      <p style={{ color: '#aaa', marginBottom: '1.25rem' }}>
+        Use Steam OpenID to sign in. After sign-in you can optionally link Discord from your dashboard.
       </p>
-      <button type="button" disabled={loading} onClick={onStartSteamSignIn}>
-        Continue With Steam
+      <button
+        type="button"
+        disabled={loading}
+        onClick={onStartSteamSignIn}
+        style={{ background: '#3a3a5e', padding: '0.5em 1.2em', fontSize: '0.9rem' }}
+      >
+        Continue with Steam
       </button>
     </section>
   );

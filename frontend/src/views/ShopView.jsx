@@ -1,116 +1,97 @@
 export default function ShopView({
   authenticated,
   accountSetupComplete,
-  premiumUser,
-  subscriptionStatus,
-  subscriptionId,
-  subscriptionCancelAtPeriodEnd,
-  subscriptionCurrentPeriodEnd,
-  subscriptionCancelAt,
   shopLoading,
   products,
   orders,
-  onStartSubscription,
-  onCancelSubscription,
+  cart,
   onBuy,
   onDownload,
+  onViewProduct,
+  onAddToCart,
 }) {
   return (
-    <section style={{ marginTop: '2rem' }}>
-      <h2 style={{ marginBottom: '0.25rem' }}>Shop</h2>
-      <p style={{ marginTop: 0, opacity: 0.85 }}>
-        Buy a package through Stripe Checkout. Orders are saved to your profile.
+    <section style={{ marginTop: '1rem' }}>
+      <h2>Shop</h2>
+      <p style={{ color: '#888', marginBottom: '1rem' }}>
+        Click a product to learn more, or add it to your cart.
       </p>
 
-      {authenticated && (
-        <section style={{ marginTop: '0.75rem', marginBottom: '1rem' }}>
-          {!accountSetupComplete && (
-            <p style={{ margin: '0 0 0.5rem 0', color: '#b45309' }}>
-              Account not setup. Link your Steam account before buying or starting subscription.
-            </p>
-          )}
-          <p style={{ margin: 0 }}>
-            Subscription status: <strong>{premiumUser ? 'Premium' : 'Standard'}</strong>
-            {' '}({String(subscriptionStatus || 'none')})
+      {authenticated && !accountSetupComplete && (
+        <section style={{
+          background: '#1e1e2e', border: '1px solid #333', borderRadius: 8,
+          padding: '0.85rem 1rem', marginBottom: '1.25rem', maxWidth: 560,
+        }}>
+          <p style={{ margin: 0, color: '#f4a261', fontSize: '0.85rem' }}>
+            Account not set up. Link your Steam account before buying.
           </p>
-          {subscriptionId && (
-            <p style={{ margin: '0.35rem 0 0 0', opacity: 0.85 }}>
-              Subscription ID: <strong>{subscriptionId}</strong>
-            </p>
-          )}
-          {subscriptionCancelAtPeriodEnd && subscriptionCurrentPeriodEnd && (
-            <p style={{ margin: '0.35rem 0 0 0', opacity: 0.85 }}>
-              Premium active until: <strong>{new Date(subscriptionCurrentPeriodEnd).toLocaleString()}</strong>
-            </p>
-          )}
-          {subscriptionCancelAt && (
-            <p style={{ margin: '0.35rem 0 0 0', opacity: 0.85 }}>
-              Cancellation effective at: <strong>{new Date(subscriptionCancelAt).toLocaleString()}</strong>
-            </p>
-          )}
-          {!premiumUser && (
-            <button type="button" style={{ marginTop: '0.5rem' }} disabled={shopLoading || !accountSetupComplete} onClick={onStartSubscription}>
-              Start Premium Subscription
-            </button>
-          )}
-          {subscriptionId && !String(subscriptionStatus || '').toLowerCase().includes('canceled') && (
-            <button
-              type="button"
-              style={{ marginTop: '0.5rem', marginLeft: premiumUser ? 0 : '0.5rem' }}
-              disabled={shopLoading}
-              onClick={onCancelSubscription}
-            >
-              Cancel Subscription
-            </button>
-          )}
         </section>
       )}
 
-      <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-        {products.map((product) => (
-          <article
-            key={product.id}
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: '0.75rem', maxWidth: 560 }}
-          >
-            <h3 style={{ margin: 0 }}>{product.name}</h3>
-            <p style={{ marginTop: '0.5rem' }}>{product.description}</p>
-            <p style={{ marginTop: '0.25rem' }}>
-              <strong>
-                {(product.amountCents / 100).toFixed(2)} {String(product.currency || '').toUpperCase()}
-              </strong>
-            </p>
-            <button
-              type="button"
-              disabled={shopLoading || !accountSetupComplete}
-              onClick={() => onBuy(product.id)}
+      <div style={{ display: 'grid', gap: '0.75rem' }}>
+        {products.map((product) => {
+          const inCart = cart.includes(product.id);
+          return (
+            <article
+              key={product.id}
+              onClick={() => onViewProduct(product.id)}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4a4a7a'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#333'; }}
+              style={{
+                background: '#1e1e2e', border: '1px solid #333',
+                borderRadius: 8, padding: '1rem', maxWidth: 560,
+                cursor: 'pointer', transition: 'border-color 0.15s',
+              }}
             >
-              Buy with Stripe
-            </button>
-          </article>
-        ))}
-        {!products.length && <p>No products configured.</p>}
+              <h3 style={{ marginBottom: '0.35rem' }}>{product.name}</h3>
+              <p style={{ color: '#aaa', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{product.description}</p>
+              <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem', color: '#cdf' }}>
+                <strong>{(product.amountCents / 100).toFixed(2)} {String(product.currency || '').toUpperCase()}</strong>
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  disabled={inCart}
+                  onClick={(e) => { e.stopPropagation(); onAddToCart(product.id); }}
+                  style={{
+                    background: inCart ? '#1e3a1e' : '#1e2a4a',
+                    border: `1px solid ${inCart ? '#3a7a3a' : '#3a5a8e'}`,
+                    color: inCart ? '#8f8' : '#adf',
+                    borderRadius: 4, padding: '4px 12px',
+                    cursor: inCart ? 'default' : 'pointer',
+                    fontSize: '0.82rem', fontFamily: 'inherit',
+                  }}
+                >
+                  {inCart ? '✓ In Cart' : '+ Add to Cart'}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onViewProduct(product.id); }}
+                  style={{ padding: '4px 12px', fontSize: '0.82rem' }}
+                >
+                  View Details →
+                </button>
+              </div>
+            </article>
+          );
+        })}
+        {!products.length && <p style={{ color: '#888' }}>No products configured.</p>}
       </div>
 
       {authenticated && (
-        <section style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ marginBottom: '0.5rem' }}>Your Orders</h3>
-          {!orders.length && !subscriptionId && <p>No orders yet.</p>}
-          {subscriptionId && (
-            <div style={{ marginBottom: '0.6rem' }}>
-              Subscription · Premium Membership · {String(subscriptionStatus || '').toUpperCase() || 'NONE'}
-              {subscriptionCancelAtPeriodEnd && subscriptionCurrentPeriodEnd
-                ? ` · Active until ${new Date(subscriptionCurrentPeriodEnd).toLocaleString()}`
-                : ''}
-            </div>
-          )}
+        <section style={{ marginTop: '1.75rem' }}>
+          <h3 style={{ marginBottom: '0.6rem' }}>Your Orders</h3>
+          {!orders.length && <p style={{ color: '#888' }}>No orders yet.</p>}
           {orders.map((order) => (
-            <div key={order.id} style={{ marginBottom: '0.6rem' }}>
-              #{order.id} · {order.productName} · {order.status} · {(order.amountCents / 100).toFixed(2)}{' '}
-              {String(order.currency || '').toUpperCase()}
+            <div key={order.id} style={orderRowStyle}>
+              <span style={{ color: '#888', fontSize: '0.82rem' }}>#{order.id}</span>
+              {' '}&middot; {order.productName}
+              {' '}&middot; <span style={{ color: order.status === 'PAID' ? '#8f8' : '#aaa' }}>{order.status}</span>
+              {' '}&middot; {(order.amountCents / 100).toFixed(2)} {String(order.currency || '').toUpperCase()}
               {order.status === 'PAID' && (
                 <button
                   type="button"
-                  style={{ marginLeft: '0.6rem' }}
+                  style={{ marginLeft: '0.6rem', padding: '2px 8px', fontSize: '0.78rem' }}
                   disabled={shopLoading}
                   onClick={() => onDownload(order.productId)}
                 >
@@ -124,3 +105,16 @@ export default function ShopView({
     </section>
   );
 }
+
+const orderRowStyle = {
+  padding: '0.45rem 0.6rem',
+  marginBottom: '0.4rem',
+  background: '#1a1a2e',
+  borderRadius: 4,
+  fontSize: '0.85rem',
+  color: '#ccc',
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: '0.15rem',
+};

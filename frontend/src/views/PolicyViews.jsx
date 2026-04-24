@@ -1,8 +1,11 @@
+const sectionStyle = { marginTop: '1rem', maxWidth: 720 };
+const leadStyle = { color: '#aaa', marginBottom: '0.75rem' };
+
 export function TermsView() {
   return (
-    <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-      <h2 style={{ marginBottom: '0.5rem' }}>Terms of Service</h2>
-      <p>By purchasing from OverKill Development, you agree to these terms.</p>
+    <section style={sectionStyle}>
+      <h2>Terms of Service</h2>
+      <p style={leadStyle}>By purchasing from OverKill Development, you agree to these terms.</p>
       <ul>
         <li>Digital products are licensed, not sold.</li>
         <li>Do not redistribute or resell purchased assets.</li>
@@ -15,9 +18,9 @@ export function TermsView() {
 
 export function PrivacyView() {
   return (
-    <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-      <h2 style={{ marginBottom: '0.5rem' }}>Privacy Policy</h2>
-      <p>OverKill Development collects only the data needed to provide accounts and purchases.</p>
+    <section style={sectionStyle}>
+      <h2>Privacy Policy</h2>
+      <p style={leadStyle}>OverKill Development collects only the data needed to provide accounts and purchases.</p>
       <ul>
         <li>We store account data (Steam64 ID, username, optional Discord identifiers).</li>
         <li>Payment card data is handled by Stripe and never stored by OverKill Development.</li>
@@ -30,9 +33,9 @@ export function PrivacyView() {
 
 export function RefundView() {
   return (
-    <section style={{ marginTop: '2rem', maxWidth: 860 }}>
-      <h2 style={{ marginBottom: '0.5rem' }}>Refund Policy</h2>
-      <p>For digital products, refunds are handled under the rules below.</p>
+    <section style={sectionStyle}>
+      <h2>Refund Policy</h2>
+      <p style={leadStyle}>For digital products, refunds are handled under the rules below.</p>
       <ul>
         <li>Refund requests are accepted within 14 days of purchase.</li>
         <li>Refunds are available for duplicate purchases or technical delivery failures.</li>

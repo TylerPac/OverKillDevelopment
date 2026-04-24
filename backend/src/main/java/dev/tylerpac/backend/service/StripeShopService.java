@@ -257,6 +257,68 @@ public class StripeShopService {
         return new CreateCheckoutSessionResponse(session.getUrl(), session.getId());
     }
 
+    @Transactional
+    public CreateCheckoutSessionResponse createCartCheckoutSession(User user, List<String> productIds, String idempotencyKey) throws StripeException {
+        if (productIds == null || productIds.isEmpty()) {
+            throw new IllegalArgumentException("product_ids_required");
+        }
+
+        List<ShopProductResponse> products = productIds.stream()
+            .distinct()
+            .map(id -> {
+                ShopProductResponse p = catalog().get(id);
+                if (p == null) throw new IllegalArgumentException("invalid_product: " + id);
+                return p;
+            })
+            .toList();
+
+        String customerId = ensureStripeCustomer(user);
+
+        // Store product IDs in metadata so the webhook can create orders on completion.
+        // No order rows are created here — the unique constraint on stripeCheckoutSessionId
+        // prevents multiple rows sharing one session ID.
+        String productIdsCsv = products.stream()
+            .map(ShopProductResponse::getId)
+            .collect(java.util.stream.Collectors.joining(","));
+
+        SessionCreateParams.Builder sessionBuilder = SessionCreateParams.builder()
+            .setMode(SessionCreateParams.Mode.PAYMENT)
+            .setCustomer(customerId)
+            .setSuccessUrl(successUrl + "?checkout=success&session_id={CHECKOUT_SESSION_ID}")
+            .setCancelUrl(cancelUrl + "?checkout=cancel")
+            .setClientReferenceId(String.valueOf(user.getId()))
+            .putMetadata("userId", String.valueOf(user.getId()))
+            .putMetadata("cartCheckout", "true")
+            .putMetadata("productIds", productIdsCsv);
+
+        for (ShopProductResponse product : products) {
+            SessionCreateParams.LineItem.PriceData priceData = SessionCreateParams.LineItem.PriceData.builder()
+                .setCurrency(product.getCurrency())
+                .setUnitAmount(product.getAmountCents())
+                .setProductData(
+                    SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                        .setName(product.getName())
+                        .setDescription(product.getDescription())
+                        .build()
+                )
+                .build();
+
+            sessionBuilder.addLineItem(
+                SessionCreateParams.LineItem.builder()
+                    .setQuantity(1L)
+                    .setPriceData(priceData)
+                    .build()
+            );
+        }
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey : UUID.randomUUID().toString())
+            .build();
+
+        Session session = Session.create(sessionBuilder.build(), requestOptions);
+        return new CreateCheckoutSessionResponse(session.getUrl(), session.getId());
+    }
+
     @Transactional(readOnly = true)
     public List<ShopOrderResponse> getOrders(User user) {
         return shopOrderRepository.findByUserOrderByCreatedAtDesc(user).stream()
@@ -290,7 +352,12 @@ public class StripeShopService {
                         if ("subscription".equalsIgnoreCase(session.getMode())) {
                             updateUserSubscriptionFromCheckoutSession(session);
                         }
-                        updateOrderFromCheckoutSession(session, STATUS_PAID);
+                        Map<String, String> meta = session.getMetadata();
+                        if (meta != null && "true".equals(meta.get("cartCheckout"))) {
+                            createCartOrdersFromSession(session);
+                        } else {
+                            updateOrderFromCheckoutSession(session, STATUS_PAID);
+                        }
                     }
                 }
                 case "checkout.session.expired" -> {
@@ -360,11 +427,48 @@ public class StripeShopService {
     }
 
     private void updateOrderFromCheckoutSession(Session session, String status) {
-        Optional<ShopOrder> orderOpt = shopOrderRepository.findByStripeCheckoutSessionId(session.getId());
-        if (orderOpt.isPresent()) {
-            ShopOrder order = orderOpt.get();
+        List<ShopOrder> orders = shopOrderRepository.findAllByStripeCheckoutSessionId(session.getId());
+        for (ShopOrder order : orders) {
             order.setStripePaymentIntentId(session.getPaymentIntent());
             markStatus(order, status);
+        }
+    }
+
+    private void createCartOrdersFromSession(Session session) {
+        Map<String, String> meta = session.getMetadata();
+        if (meta == null) return;
+
+        String productIdsCsv = meta.get("productIds");
+        String userIdStr = meta.get("userId");
+        if (!StringUtils.hasText(productIdsCsv) || !StringUtils.hasText(userIdStr)) return;
+
+        long userId;
+        try {
+            userId = Long.parseLong(userIdStr);
+        } catch (NumberFormatException ignored) {
+            return;
+        }
+
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null) return;
+
+        String[] ids = productIdsCsv.split(",");
+        for (String productId : ids) {
+            productId = productId.trim();
+            ShopProductResponse product = catalog().get(productId);
+            if (product == null) continue;
+
+            ShopOrder order = new ShopOrder();
+            order.setUser(user);
+            order.setProductId(product.getId());
+            order.setProductName(product.getName());
+            order.setAmountCents(product.getAmountCents());
+            order.setCurrency(product.getCurrency());
+            order.setStatus(STATUS_PAID);
+            order.setStripeCheckoutSessionId(session.getId() + "_" + product.getId());
+            order.setStripePaymentIntentId(session.getPaymentIntent());
+            shopOrderRepository.save(order);
+            purchaseEmailService.sendOrderPaid(user, order);
         }
     }
 

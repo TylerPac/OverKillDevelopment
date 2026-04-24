@@ -3,20 +3,18 @@ import useSessionState from './hooks/useSessionState';
 import { getDiscordLinkUrl, getSteamLoginUrl } from './services/authService';
 import { callProtectedText, downloadProductBlob } from './services/apiClient';
 import {
-  cancelSubscription,
+  createCartCheckoutSession,
   createCheckoutSession,
-  createSubscriptionCheckoutSession,
   getOrders,
   getProducts,
-  getSubscriptionStatus,
-  syncSubscriptionFromSession,
 } from './services/shopService';
-import { boolFromString } from './utils/authToken';
 import AuthView from './views/AuthView';
+import CartView from './views/CartView';
 import CustomerView from './views/CustomerView';
 import DashboardView from './views/DashboardView';
 import HomeView from './views/HomeView';
 import { PrivacyView, RefundView, TermsView } from './views/PolicyViews';
+import ProductDetailView from './views/ProductDetailView';
 import ShopView from './views/ShopView';
 import TierPainterView from './views/TierPainterView';
 
@@ -28,6 +26,8 @@ export default function App() {
   const [shopLoading, setShopLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   const session = useSessionState((message) => {
     setProtectedData('No protected request made yet.');
@@ -55,8 +55,6 @@ export default function App() {
       const nextOrders = await getOrders(session.token);
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
 
-      const nextSubscription = await getSubscriptionStatus(session.token);
-      session.applySubscriptionState(nextSubscription);
       await session.loadAuthProfile(session.token);
     } catch (error) {
       setStatus(`Shop load failed: ${error.message}`);
@@ -76,8 +74,6 @@ export default function App() {
       const nextOrders = await getOrders(session.token);
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
 
-      const nextSubscription = await getSubscriptionStatus(session.token);
-      session.applySubscriptionState(nextSubscription);
       await session.loadAuthProfile(session.token);
     } catch (error) {
       setStatus(`Customer page load failed: ${error.message}`);
@@ -96,8 +92,6 @@ export default function App() {
     const tokenFromUrl = search.get('token');
     const refreshFromUrl = search.get('refreshToken') || '';
     const usernameFromUrl = search.get('username') || '';
-    const premiumFromUrl = boolFromString(search.get('premiumUser'), false);
-    const subscriptionFromUrl = search.get('subscriptionStatus') || 'none';
 
     async function completeSteamCallback() {
       if (!tokenFromUrl || !usernameFromUrl) {
@@ -111,8 +105,6 @@ export default function App() {
         {
           token: tokenFromUrl,
           refreshToken: refreshFromUrl,
-          premiumUser: premiumFromUrl,
-          subscriptionStatus: subscriptionFromUrl,
           emailVerified: true,
           accountSetupComplete: true,
         },
@@ -190,9 +182,7 @@ export default function App() {
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
     const checkout = search.get('checkout');
-    const subscription = search.get('subscription');
-    const checkoutSessionId = search.get('session_id');
-    if (!checkout && !subscription) {
+    if (!checkout) {
       return;
     }
 
@@ -201,27 +191,8 @@ export default function App() {
       setStatus('Payment completed. Stripe webhook will update your order status shortly.');
     } else if (checkout === 'cancel') {
       setStatus('Checkout canceled. No charge was made.');
-    } else if (subscription === 'success') {
-      setStatus('Subscription checkout completed. Premium status updates after webhook confirmation.');
-    } else if (subscription === 'cancel') {
-      setStatus('Subscription checkout canceled.');
     }
 
-    async function syncIfNeeded() {
-      if (subscription !== 'success' || !checkoutSessionId || !session.token) {
-        return;
-      }
-
-      try {
-        await syncSubscriptionFromSession(session.token, checkoutSessionId);
-        await loadShopData();
-        setStatus('Subscription activated. Your account is now premium.');
-      } catch (error) {
-        setStatus(`Subscription checkout completed but sync failed: ${error.message}`);
-      }
-    }
-
-    syncIfNeeded();
     window.history.replaceState({}, '', '/');
   }, [session]);
 
@@ -252,6 +223,42 @@ export default function App() {
     } catch (error) {
       setStatus(`Discord link failed: ${error.message}`);
       setLoading(false);
+    }
+  }
+
+  async function handleCartCheckout() {
+    if (!session.authenticated || !session.token) {
+      setStatus('Please log in before purchasing.');
+      setView('auth');
+      return;
+    }
+
+    if (!session.accountSetupComplete) {
+      setStatus('Account not setup. Link your Steam account before buying.');
+      return;
+    }
+
+    if (cart.length === 0) return;
+
+    setShopLoading(true);
+    setStatus('Creating Stripe checkout session...');
+
+    try {
+      const idempotencyKey = `cart-${cart.slice().sort().join('-')}-${Date.now()}`;
+      const response = await createCartCheckoutSession(cart, session.token, idempotencyKey);
+
+      if (!response?.checkoutUrl) {
+        throw new Error('No checkout URL returned by backend');
+      }
+
+      window.location.assign(response.checkoutUrl);
+    } catch (error) {
+      if (error.message === 'account_not_setup') {
+        setStatus('Account not setup. Link your Steam account before buying.');
+      } else {
+        setStatus(`Checkout failed: ${error.message}`);
+      }
+      setShopLoading(false);
     }
   }
 
@@ -361,30 +368,6 @@ export default function App() {
     }
   }
 
-  async function handleCancelSubscription() {
-    if (!session.authenticated || !session.token) {
-      setStatus('Please log in before canceling subscription.');
-      return;
-    }
-
-    setShopLoading(true);
-    setStatus('Canceling your subscription...');
-
-    try {
-      await cancelSubscription(session.token);
-      await loadShopData();
-      setStatus('Subscription will cancel at period end. Premium remains active until then.');
-    } catch (error) {
-      if (error.message === 'subscription_not_found') {
-        setStatus('No active subscription found.');
-      } else {
-        setStatus(`Cancel subscription failed: ${error.message}`);
-      }
-    } finally {
-      setShopLoading(false);
-    }
-  }
-
   async function handleProtectedRequest(path) {
     if (!session.authenticated) {
       setStatus('Please sign in with Steam first.');
@@ -430,6 +413,21 @@ export default function App() {
     loadShopData();
   }
 
+  function openProduct(productId) {
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    setSelectedProduct(product);
+    setView('product-detail');
+  }
+
+  function addToCart(productId) {
+    setCart((prev) => (prev.includes(productId) ? prev : [...prev, productId]));
+  }
+
+  function removeFromCart(productId) {
+    setCart((prev) => prev.filter((id) => id !== productId));
+  }
+
   function openPolicy(viewName) {
     setView(viewName);
   }
@@ -450,31 +448,40 @@ export default function App() {
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: '0 auto', padding: '1.25rem', width: '100%' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button type="button" onClick={() => setView('home')}>Home</button>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#111', color: '#eee' }}>
+      {/* ── Top nav bar ──────────────────────────────────────────────── */}
+      <header style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '0 1.5rem', height: 48, background: '#1e1e2e',
+        borderBottom: '1px solid #333', flexShrink: 0,
+      }}>
+        <button
+          type="button"
+          onClick={() => setView('home')}
+          style={{ background: 'transparent', border: 'none', color: '#cdf', fontWeight: 700, fontSize: '0.95rem', padding: '0 4px', cursor: 'pointer' }}
+        >
+          OverKill Development
+        </button>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <button type="button" onClick={openShop}>Shop</button>
+        <nav style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button type="button" onClick={openShop} style={navBtnStyle}>Shop</button>
+          <button type="button" onClick={() => setView('cart')} style={navBtnStyle}>
+            Cart{cart.length > 0 ? ` (${cart.length})` : ''}
+          </button>
           {session.authenticated ? (
             <>
-              <button type="button" onClick={() => setView('dashboard')}>Dashboard</button>
-              <button type="button" onClick={openCustomer}>Customer</button>
-              <button type="button" onClick={signOut}>Log Out</button>
+              <button type="button" onClick={() => setView('dashboard')} style={navBtnStyle}>Dashboard</button>
+              <button type="button" onClick={openCustomer} style={navBtnStyle}>Customer</button>
+              <button type="button" onClick={signOut} style={{ ...navBtnStyle, color: '#f88', borderColor: '#633' }}>Log Out</button>
             </>
           ) : (
-            <>
-              <button type="button" onClick={openAuth}>Sign In</button>
-            </>
+            <button type="button" onClick={openAuth} style={{ ...navBtnStyle, color: '#8f8', borderColor: '#363' }}>Sign In</button>
           )}
-        </div>
+        </nav>
       </header>
 
-      {/*
-        <section style={{ marginTop: '1rem' }}>
-        <strong>Status:</strong> <span>{status}</span>
-      </section>
-      */}
+      {/* ── Page content ─────────────────────────────────────────────── */}
+      <main style={{ flex: 1, maxWidth: 860, width: '100%', margin: '0 auto', padding: '1.75rem 1.5rem' }}>
 
       {view === 'home' && <HomeView />}
       {view === 'auth' && !session.authenticated && (
@@ -484,8 +491,6 @@ export default function App() {
         <DashboardView
           currentUser={session.currentUser}
           sessionId={session.sessionId}
-          premiumUser={session.premiumUser}
-          subscriptionStatus={session.subscriptionStatus}
           accountSetupComplete={session.accountSetupComplete}
           emailVerified={session.emailVerified}
           steam64Id={session.steam64Id}
@@ -511,19 +516,37 @@ export default function App() {
         <ShopView
           authenticated={session.authenticated}
           accountSetupComplete={session.accountSetupComplete}
-          premiumUser={session.premiumUser}
-          subscriptionStatus={session.subscriptionStatus}
-          subscriptionId={session.subscriptionId}
-          subscriptionCancelAtPeriodEnd={session.subscriptionCancelAtPeriodEnd}
-          subscriptionCurrentPeriodEnd={session.subscriptionCurrentPeriodEnd}
-          subscriptionCancelAt={session.subscriptionCancelAt}
           shopLoading={shopLoading}
           products={products}
           orders={orders}
-          onStartSubscription={handleStartSubscription}
-          onCancelSubscription={handleCancelSubscription}
+          cart={cart}
           onBuy={handleBuy}
           onDownload={handleDownload}
+          onViewProduct={openProduct}
+          onAddToCart={addToCart}
+        />
+      )}
+      {view === 'product-detail' && selectedProduct && (
+        <ProductDetailView
+          product={selectedProduct}
+          cart={cart}
+          onAddToCart={addToCart}
+          onBuy={handleBuy}
+          onBack={() => setView('shop')}
+          shopLoading={shopLoading}
+          accountSetupComplete={session.accountSetupComplete}
+        />
+      )}
+      {view === 'cart' && (
+        <CartView
+          cart={cart}
+          products={products}
+          onRemoveFromCart={removeFromCart}
+          onBuy={handleBuy}
+          onCheckoutCart={handleCartCheckout}
+          onBack={openShop}
+          shopLoading={shopLoading}
+          accountSetupComplete={session.accountSetupComplete}
         />
       )}
       {view === 'terms' && <TermsView />}
@@ -544,11 +567,29 @@ export default function App() {
         </section>
       )}
 
-      <footer style={{ marginTop: '2rem', paddingTop: '0.75rem', borderTop: '1px solid #ddd', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => openPolicy('terms')}>Terms</button>
-        <button type="button" onClick={() => openPolicy('privacy')}>Privacy</button>
-        <button type="button" onClick={() => openPolicy('refund')}>Refund</button>
+      </main>
+
+      {/* ── Footer ───────────────────────────────────────────────────── */}
+      <footer style={{
+        borderTop: '1px solid #2a2a3e', padding: '0.6rem 1.5rem',
+        display: 'flex', gap: '0.5rem', flexWrap: 'wrap', background: '#1e1e2e',
+        flexShrink: 0,
+      }}>
+        <button type="button" onClick={() => openPolicy('terms')} style={navBtnStyle}>Terms</button>
+        <button type="button" onClick={() => openPolicy('privacy')} style={navBtnStyle}>Privacy</button>
+        <button type="button" onClick={() => openPolicy('refund')} style={navBtnStyle}>Refund</button>
       </footer>
-    </main>
+    </div>
   );
 }
+
+const navBtnStyle = {
+  background: 'transparent',
+  border: '1px solid #444',
+  color: '#ccc',
+  borderRadius: 4,
+  padding: '3px 10px',
+  cursor: 'pointer',
+  fontSize: '0.8rem',
+  fontFamily: 'inherit',
+};

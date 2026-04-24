@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
 
+import dev.tylerpac.backend.dto.CreateCartCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
@@ -82,6 +83,26 @@ public class ShopController {
             return ResponseEntity.ok(orders);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/cart-checkout-session")
+    public ResponseEntity<?> createCartCheckoutSession(
+        @Valid @RequestBody CreateCartCheckoutSessionRequest request,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        Principal principal
+    ) {
+        try {
+            User user = requireUser(principal);
+            if (!StringUtils.hasText(user.getSteam64Id())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("account_not_setup");
+            }
+            CreateCheckoutSessionResponse response = stripeShopService.createCartCheckoutSession(user, request.getProductIds(), idempotencyKey);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        } catch (StripeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
         }
     }
 
