@@ -20,12 +20,17 @@ pipeline {
                     string(credentialsId: 'OVERKILL_JWT_SECRET',                   variable: 'JWT_SECRET'),
                     string(credentialsId: 'OVERKILL_STRIPE_SECRET_KEY',            variable: 'STRIPE_SECRET_KEY'),
                     string(credentialsId: 'OVERKILL_STRIPE_WEBHOOK_SECRET',        variable: 'STRIPE_WEBHOOK_SECRET'),
-                    string(credentialsId: 'OVERKILL_STRIPE_PREMIUM_PRICE_ID',      variable: 'STRIPE_PREMIUM_PRICE_ID'),
                     string(credentialsId: 'OVERKILL_DISCORD_CLIENT_ID',            variable: 'DISCORD_CLIENT_ID'),
                     string(credentialsId: 'OVERKILL_DISCORD_CLIENT_SECRET',        variable: 'DISCORD_CLIENT_SECRET'),
                     string(credentialsId: 'OVERKILL_GITHUB_CLIENT_ID',             variable: 'GITHUB_CLIENT_ID'),
                     string(credentialsId: 'OVERKILL_GITHUB_CLIENT_SECRET',         variable: 'GITHUB_CLIENT_SECRET'),
                     string(credentialsId: 'OVERKILL_GITHUB_BOT_TOKEN',             variable: 'GITHUB_BOT_TOKEN'),
+                    // Google — stored without OVERKILL_ prefix in Jenkins
+                    string(credentialsId: 'GOOGLE_CLIENT_ID',                      variable: 'GOOGLE_CLIENT_ID'),
+                    string(credentialsId: 'GOOGLE_CLIENT_SECRET',                  variable: 'GOOGLE_CLIENT_SECRET'),
+                    string(credentialsId: 'OVERKILL_GOOGLE_TEMPLATE_SPREADSHEET_ID', variable: 'GOOGLE_TEMPLATE_SPREADSHEET_ID'),
+                    // Encryption key for stored refresh tokens
+                    string(credentialsId: 'OVERKILL_APP_SECRET',                   variable: 'APP_SECRET'),
                 ]) {
                     // Write backend/.env.production from Jenkins secrets
                     sh '''
@@ -35,9 +40,9 @@ DB_USERNAME=${MYSQL_USER}
 DB_PASSWORD=${MYSQL_PASSWORD}
 SPRING_PROFILES_ACTIVE=prod
 JWT_SECRET=${JWT_SECRET}
+APP_SECRET=${APP_SECRET}
 STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-STRIPE_PREMIUM_PRICE_ID=${STRIPE_PREMIUM_PRICE_ID}
 APP_AUTH_FRONTEND_BASE_URL=https://overkilldayz.com
 APP_AUTH_STEAM_REALM=https://overkilldayz.com
 APP_AUTH_STEAM_RETURN_URL=https://overkilldayz.com/api/auth/steam/callback
@@ -48,9 +53,16 @@ APP_AUTH_GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
 APP_AUTH_GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
 APP_AUTH_GITHUB_REDIRECT_URI=https://overkilldayz.com/api/auth/github/callback
 APP_GITHUB_BOT_TOKEN=${GITHUB_BOT_TOKEN}
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+GOOGLE_REDIRECT_URI=https://overkilldayz.com/api/google/callback
+GOOGLE_TEMPLATE_SPREADSHEET_ID=${GOOGLE_TEMPLATE_SPREADSHEET_ID}
 APP_SHOP_SUCCESS_URL=https://overkilldayz.com
 APP_SHOP_CANCEL_URL=https://overkilldayz.com
 APP_SHOP_DOWNLOAD_ROOT=downloads
+APP_SHOP_GITHUB_REPO_KEYCARD_CRATES=OverKill-Dayz/KeycardCrates
+APP_SHOP_GITHUB_REPO_WEAPON_SYSTEM=OverKill-Dayz/DankOpticsPack,OverKill-Dayz/DankWeaponPack,OverKill-Dayz/DankWeaponPack2,OverKill-Dayz/DankWeaponPack3,OverKill-Dayz/DankWeaponScripts,OverKill-Dayz/DankWeaponSounds,OverKill-Dayz/OverKillAmmo
+APP_SHOP_GITHUB_REPO_BATTLE_PASS=OverKill-Dayz/BattlePass,OverKill-Dayz/UniversalApi
 EOF
 '''
                     sh 'docker compose -f docker-compose.yml down --remove-orphans || true'
