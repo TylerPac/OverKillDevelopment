@@ -48,12 +48,10 @@ export default function TierPainterView({ token, onBack }) {
   const canvasRef = useRef(null);
 
   // Model (not state — mutated directly, canvas redraws via requestAnimationFrame)
-  const modelRef    = useRef(null);
-  const overlayRef  = useRef(null); // ImageData pixel cache (gridN*gridN*4)
-  const dirtyRef    = useRef(true); // force full redraw on next frame
-  const cellsDirtyRef = useRef(true); // true when cells/viewport changed (offscreen cache stale)
-  const offscreenRef  = useRef(null); // cached static scene (bg + cells + grid lines)
-  const bgImageRef  = useRef(null); // background map image
+  const modelRef       = useRef(null);
+  const dirtyRef       = useRef(true);  // triggers rAF blit each frame
+  const cellsCanvasRef = useRef(null);  // { canvas, ctx, imageData, buf32 } — world-space gridN×gridN pixels
+  const bgImageRef     = useRef(null);  // background map image
 
   useEffect(() => {
     const candidates = [
@@ -68,7 +66,7 @@ export default function TierPainterView({ token, onBack }) {
       if (idx >= candidates.length) return;
       const src = candidates[idx++];
       const img = new Image();
-      img.onload = () => { bgImageRef.current = img; cellsDirtyRef.current = true; dirtyRef.current = true; };
+      img.onload = () => { bgImageRef.current = img; dirtyRef.current = true; };
       img.onerror = () => tryNext();
       img.src = src;
     }
@@ -78,7 +76,7 @@ export default function TierPainterView({ token, onBack }) {
   function loadBgImage(baseName) {
     if (!baseName) {
       bgImageRef.current = null;
-      cellsDirtyRef.current = true; dirtyRef.current = true;
+      dirtyRef.current = true;
       return;
     }
 
@@ -90,13 +88,13 @@ export default function TierPainterView({ token, onBack }) {
     ];
     let idx = 0;
     bgImageRef.current = null;
-    cellsDirtyRef.current = true; dirtyRef.current = true;
+    dirtyRef.current = true;
 
     function tryNext() {
       if (idx >= candidates.length) return;
       const src = candidates[idx++];
       const img = new Image();
-      img.onload = () => { bgImageRef.current = img; cellsDirtyRef.current = true; dirtyRef.current = true; };
+      img.onload = () => { bgImageRef.current = img; dirtyRef.current = true; };
       img.onerror = () => tryNext();
       img.src = src;
     }
@@ -144,8 +142,6 @@ export default function TierPainterView({ token, onBack }) {
   useEffect(() => {
     const model = new TierGridModel(worldSize, totalTiers);
     modelRef.current = model;
-    overlayRef.current = null;   // force full rebuild
-    cellsDirtyRef.current = true; dirtyRef.current = true;
     // If we have pending polygons that were loaded alongside a worldSize/totalTiers change,
     // import them into the newly-created model now.
     if (pendingPolygonsRef.current) {
@@ -157,10 +153,71 @@ export default function TierPainterView({ token, onBack }) {
         setMapStatus('Load failed: ' + String(e));
       }
     }
+    rebuildCellsCanvas();
     resetViewport();
   }, [worldSize, totalTiers]);
 
+  // ── Cell canvas helpers ───────────────────────────────────────────────────
+  // Writes every cell into a gridN×gridN ImageData using direct Uint32Array
+  // pixel writes — O(gridN²) but no canvas API per cell, and runs only when
+  // cell data actually changes. Zoom/pan never call this.
+  function rebuildCellsCanvas() {
+    const model = modelRef.current;
+    if (!model) return;
+    const N = model.gridN;
+    if (!cellsCanvasRef.current) {
+      const canvas = document.createElement('canvas');
+      cellsCanvasRef.current = { canvas, ctx: canvas.getContext('2d'), imageData: null, buf32: null };
+    }
+    const cells = cellsCanvasRef.current;
+    if (cells.canvas.width !== N || cells.canvas.height !== N) {
+      cells.canvas.width  = N;
+      cells.canvas.height = N;
+      cells.imageData = cells.ctx.createImageData(N, N);
+      cells.buf32     = new Uint32Array(cells.imageData.data.buffer);
+    }
+    const { imageData, buf32, ctx } = cells;
+    const active = tierIdxRef.current;
+    for (let i = 0; i < N * N; i++) {
+      const t = model.ownerGrid[i];
+      if (t < 0 || t >= model.totalTiers) { buf32[i] = 0; continue; }
+      const [r, g, b] = TIER_COLORS[t % TIER_COLORS.length];
+      const a = Math.round((t === active ? ALPHA_ACTIVE : ALPHA_INACTIVE) * 255);
+      // little-endian RGBA: R | G<<8 | B<<16 | A<<24
+      buf32[i] = (r | (g << 8) | (b << 16) | (a << 24)) >>> 0;
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  // Updates only the brush bounding-box in the ImageData — O((2r+1)²) — then
+  // calls partial putImageData so only those pixels are flushed to the canvas.
+  function updateCellsRegion(cx, cz, radius) {
+    const model = modelRef.current;
+    const cells = cellsCanvasRef.current;
+    if (!model || !cells || !cells.imageData) return;
+    const { ctx, imageData, buf32 } = cells;
+    const active = tierIdxRef.current;
+    const N  = model.gridN;
+    const x0 = Math.max(0, cx - radius), x1 = Math.min(N - 1, cx + radius);
+    const z0 = Math.max(0, cz - radius), z1 = Math.min(N - 1, cz + radius);
+    const r2 = radius * radius;
+    for (let iz = z0; iz <= z1; iz++) {
+      for (let ix = x0; ix <= x1; ix++) {
+        const dx = ix - cx, dz = iz - cz;
+        if (dx * dx + dz * dz > r2) continue;
+        const idx = iz * N + ix;
+        const t = model.ownerGrid[idx];
+        if (t < 0 || t >= model.totalTiers) { buf32[idx] = 0; continue; }
+        const [r_c, g_c, b_c] = TIER_COLORS[t % TIER_COLORS.length];
+        const a = Math.round((t === active ? ALPHA_ACTIVE : ALPHA_INACTIVE) * 255);
+        buf32[idx] = (r_c | (g_c << 8) | (b_c << 16) | (a << 24)) >>> 0;
+      }
+    }
+    ctx.putImageData(imageData, 0, 0, x0, z0, x1 - x0 + 1, z1 - z0 + 1);
+  }
+
   // ── Canvas render loop ────────────────────────────────────────────────────
+  // Hot path: zoom/pan = 3 drawImage GPU blits, O(1). No cell iteration.
   useEffect(() => {
     let rafId;
 
@@ -172,77 +229,61 @@ export default function TierPainterView({ token, onBack }) {
       if (!dirtyRef.current) return;
       dirtyRef.current = false;
 
-      const ctx    = canvas.getContext('2d');
-      const vp     = viewportRef.current;
-      const cellPx = (canvas.width / model.gridN) * vp.zoom;
+      const ctx     = canvas.getContext('2d');
+      const vp      = viewportRef.current;
+      const cellPx  = (canvas.width / model.gridN) * vp.zoom;
       const offsetX = vp.panX + canvas.width  / 2 - (model.gridN * cellPx) / 2;
       const offsetY = vp.panY + canvas.height / 2 - (model.gridN * cellPx) / 2;
+      const worldW  = model.gridN * cellPx;
+      const worldH  = model.gridN * cellPx;
 
-      // ── Rebuild offscreen cache when cells or viewport changed ────────
-      if (cellsDirtyRef.current) {
-        cellsDirtyRef.current = false;
-        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-        const off = offscreenRef.current;
-        if (off.width !== canvas.width || off.height !== canvas.height) {
-          off.width  = canvas.width;
-          off.height = canvas.height;
-        }
-        const oc = off.getContext('2d');
-        oc.clearRect(0, 0, off.width, off.height);
-        oc.save();
-        oc.translate(offsetX, offsetY);
+      // ── Background ───────────────────────────────────────────────────
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(offsetX, offsetY, worldW, worldH);
 
-        // Grid background
-        oc.fillStyle = '#1a1a2e';
-        oc.fillRect(0, 0, model.gridN * cellPx, model.gridN * cellPx);
-
-        // Background map image
-        if (bgImageRef.current) {
-          oc.drawImage(bgImageRef.current, 0, 0, model.gridN * cellPx, model.gridN * cellPx);
-        }
-
-        // Tier cells — single O(gridN²) pass, batch rects per tier via Path2D
-        const tierPaths   = Array.from({ length: model.totalTiers }, () => new Path2D());
-        const tierHasCell = new Uint8Array(model.totalTiers);
-        for (let iz = 0; iz < model.gridN; iz++) {
-          for (let ix = 0; ix < model.gridN; ix++) {
-            const t = model.getCell(ix, iz);
-            if (t < 0 || t >= model.totalTiers) continue;
-            tierPaths[t].rect(ix * cellPx, iz * cellPx, cellPx, cellPx);
-            tierHasCell[t] = 1;
-          }
-        }
-        for (let tier = 0; tier < model.totalTiers; tier++) {
-          if (!tierHasCell[tier]) continue;
-          oc.fillStyle = tierColor(tier, tier === tierIdxRef.current);
-          oc.fill(tierPaths[tier]);
-        }
-
-        // Grid lines — single batched path (was ~1200 individual stroke calls)
-        if (cellPx > 2) {
-          oc.strokeStyle = 'rgba(255,255,255,0.06)';
-          oc.lineWidth = 0.5;
-          oc.beginPath();
-          for (let i = 0; i <= model.gridN; i++) {
-            const p = i * cellPx;
-            oc.moveTo(p, 0); oc.lineTo(p, model.gridN * cellPx);
-            oc.moveTo(0, p); oc.lineTo(model.gridN * cellPx, p);
-          }
-          oc.stroke();
-        }
-
-        oc.restore();
-        // Canvas border on offscreen
-        oc.strokeStyle = '#444';
-        oc.lineWidth = 1;
-        oc.strokeRect(0, 0, off.width, off.height);
+      // ── Map image — GPU-scaled blit, O(1) ───────────────────────────
+      if (bgImageRef.current) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'low';
+        ctx.drawImage(bgImageRef.current, offsetX, offsetY, worldW, worldH);
       }
 
-      // ── Blit cached scene ─────────────────────────────────────────────
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (offscreenRef.current) ctx.drawImage(offscreenRef.current, 0, 0);
+      // ── Cell layer — GPU-scaled blit, O(1); nearest-neighbour for crisp tier edges
+      if (cellsCanvasRef.current) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(cellsCanvasRef.current.canvas, offsetX, offsetY, worldW, worldH);
+        ctx.imageSmoothingEnabled = true;
+      }
 
-      // ── Brush preview cursor (always redrawn, never cached) ───────────
+      // ── Grid lines — only visible cells, only when zoomed in ─────────
+      if (cellPx >= 12) {
+        const ix0 = Math.max(0, Math.floor(-offsetX / cellPx));
+        const ix1 = Math.min(model.gridN, Math.ceil((canvas.width  - offsetX) / cellPx));
+        const iz0 = Math.max(0, Math.floor(-offsetY / cellPx));
+        const iz1 = Math.min(model.gridN, Math.ceil((canvas.height - offsetY) / cellPx));
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        for (let i = ix0; i <= ix1; i++) {
+          const x = i * cellPx + offsetX;
+          ctx.moveTo(x, iz0 * cellPx + offsetY);
+          ctx.lineTo(x, iz1 * cellPx + offsetY);
+        }
+        for (let i = iz0; i <= iz1; i++) {
+          const z = i * cellPx + offsetY;
+          ctx.moveTo(ix0 * cellPx + offsetX, z);
+          ctx.lineTo(ix1 * cellPx + offsetX, z);
+        }
+        ctx.stroke();
+      }
+
+      // ── Canvas border ────────────────────────────────────────────────
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(offsetX, offsetY, worldW, worldH);
+
+      // ── Brush preview cursor ─────────────────────────────────────────
       if (pointerRef.current.inside) {
         const ix = Math.floor((pointerRef.current.x - offsetX) / cellPx);
         const iz = Math.floor((pointerRef.current.y - offsetY) / cellPx);
@@ -263,7 +304,7 @@ export default function TierPainterView({ token, onBack }) {
         ctx.fill();
         ctx.restore();
       }
-    } // end frame
+    }
 
     rafId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafId);
@@ -277,8 +318,7 @@ export default function TierPainterView({ token, onBack }) {
       const parent = canvas.parentElement;
       canvas.width  = parent.clientWidth  || 800;
       canvas.height = parent.clientHeight || 600;
-      if (offscreenRef.current) { offscreenRef.current.width = 0; } // invalidate cached size
-      cellsDirtyRef.current = true; dirtyRef.current = true;
+      dirtyRef.current = true;
     }
     onResize();
     window.addEventListener('resize', onResize);
@@ -294,13 +334,15 @@ export default function TierPainterView({ token, onBack }) {
         return;
       }
       if (e.key === ']') {
-        setTierIdx((v) => Math.min(v + 1, totalTiers - 1));
-        cellsDirtyRef.current = true; dirtyRef.current = true;
+        const next = Math.min(tierIdxRef.current + 1, totalTiers - 1);
+        tierIdxRef.current = next; setTierIdx(next);
+        rebuildCellsCanvas(); dirtyRef.current = true;
         return;
       }
       if (e.key === '[') {
-        setTierIdx((v) => Math.max(v - 1, 0));
-        cellsDirtyRef.current = true; dirtyRef.current = true;
+        const next = Math.max(tierIdxRef.current - 1, 0);
+        tierIdxRef.current = next; setTierIdx(next);
+        rebuildCellsCanvas(); dirtyRef.current = true;
         return;
       }
       if (e.key === '+' || e.key === '=') {
@@ -315,13 +357,13 @@ export default function TierPainterView({ token, onBack }) {
         e.preventDefault();
         if (!modelRef.current) return;
         modelRef.current.undo();
-        cellsDirtyRef.current = true; dirtyRef.current = true;
+        rebuildCellsCanvas(); dirtyRef.current = true;
         return;
       }
       if (e.key === 'Backspace') {
         if (!modelRef.current) return;
         modelRef.current.undo();
-        cellsDirtyRef.current = true; dirtyRef.current = true;
+        rebuildCellsCanvas(); dirtyRef.current = true;
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
@@ -337,7 +379,7 @@ export default function TierPainterView({ token, onBack }) {
   // ── Helpers ───────────────────────────────────────────────────────────────
   function resetViewport() {
     viewportRef.current = { panX: 0, panY: 0, zoom: 1 };
-    cellsDirtyRef.current = true; dirtyRef.current = true;
+    dirtyRef.current = true;
   }
 
   function canvasToCell(canvasX, canvasY) {
@@ -356,74 +398,6 @@ export default function TierPainterView({ token, onBack }) {
 
   // ── Mouse events ──────────────────────────────────────────────────────────
 
-  // Incrementally repaints only the brush bounding-box region on the offscreen
-  // canvas — O((2r+1)²) instead of O(gridN²). Falls back to full rebuild when
-  // the offscreen isn't ready or its size doesn't match the canvas.
-  function incrementalPaintBrush(centerIX, centerIZ, radius) {
-    const off    = offscreenRef.current;
-    const canvas = canvasRef.current;
-    const model  = modelRef.current;
-    if (!off || !canvas || !model || off.width !== canvas.width || off.height !== canvas.height) {
-      cellsDirtyRef.current = true;
-      return;
-    }
-    const oc      = off.getContext('2d');
-    const vp      = viewportRef.current;
-    const cellPx  = (canvas.width / model.gridN) * vp.zoom;
-    const offsetX = vp.panX + canvas.width  / 2 - (model.gridN * cellPx) / 2;
-    const offsetY = vp.panY + canvas.height / 2 - (model.gridN * cellPx) / 2;
-
-    const minIX = Math.max(0, centerIX - radius);
-    const maxIX = Math.min(model.gridN - 1, centerIX + radius);
-    const minIZ = Math.max(0, centerIZ - radius);
-    const maxIZ = Math.min(model.gridN - 1, centerIZ + radius);
-
-    const bx = minIX * cellPx + offsetX;
-    const bz = minIZ * cellPx + offsetY;
-    const bw = (maxIX - minIX + 1) * cellPx;
-    const bh = (maxIZ - minIZ + 1) * cellPx;
-
-    oc.save();
-    oc.beginPath();
-    oc.rect(bx, bz, bw, bh);
-    oc.clip();
-
-    // Repaint background in region
-    oc.fillStyle = '#1a1a2e';
-    oc.fillRect(bx, bz, bw, bh);
-    if (bgImageRef.current) {
-      oc.drawImage(bgImageRef.current, offsetX, offsetY, model.gridN * cellPx, model.gridN * cellPx);
-    }
-
-    // Repaint all tier cells in region (reads from model — already updated by applyBrush)
-    for (let iz = minIZ; iz <= maxIZ; iz++) {
-      for (let ix = minIX; ix <= maxIX; ix++) {
-        const t = model.getCell(ix, iz);
-        if (t < 0 || t >= model.totalTiers) continue;
-        oc.fillStyle = tierColor(t, t === tierIdxRef.current);
-        oc.fillRect(ix * cellPx + offsetX, iz * cellPx + offsetY, cellPx, cellPx);
-      }
-    }
-
-    // Repaint grid lines in region
-    if (cellPx > 2) {
-      oc.strokeStyle = 'rgba(255,255,255,0.06)';
-      oc.lineWidth = 0.5;
-      oc.beginPath();
-      for (let i = minIX; i <= maxIX + 1; i++) {
-        const x = i * cellPx + offsetX;
-        oc.moveTo(x, bz); oc.lineTo(x, bz + bh);
-      }
-      for (let i = minIZ; i <= maxIZ + 1; i++) {
-        const z = i * cellPx + offsetY;
-        oc.moveTo(bx, z); oc.lineTo(bx + bw, z);
-      }
-      oc.stroke();
-    }
-
-    oc.restore();
-  }
-
   const onMouseDown = useCallback((e) => {
     if (e.button === 2) {
       panningRef.current = true;
@@ -437,7 +411,7 @@ export default function TierPainterView({ token, onBack }) {
       const cell = canvasToCell(e.clientX - rect.left, e.clientY - rect.top);
       if (cell) {
         const changed = modelRef.current?.applyBrush(cell.ix, cell.iz, brushRadiusRef.current, tierIdxRef.current, eraseModeRef.current);
-        if (changed) incrementalPaintBrush(cell.ix, cell.iz, brushRadiusRef.current);
+        if (changed) updateCellsRegion(cell.ix, cell.iz, brushRadiusRef.current);
         dirtyRef.current = true;
       }
     }
@@ -460,15 +434,15 @@ export default function TierPainterView({ token, onBack }) {
       viewportRef.current.panX += dx;
       viewportRef.current.panY += dy;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
-      cellsDirtyRef.current = true; // viewport changed — rebuild offscreen
+      // Pan handled by drawImage viewport transform each frame — no cell rebuild needed
       return;
     }
     if (paintingRef.current) {
       const cell = canvasToCell(e.clientX - rect.left, e.clientY - rect.top);
       if (cell) {
         const changed = modelRef.current?.applyBrush(cell.ix, cell.iz, brushRadiusRef.current, tierIdxRef.current, eraseModeRef.current);
-        if (changed) incrementalPaintBrush(cell.ix, cell.iz, brushRadiusRef.current);
-        // dirtyRef already set above for cursor movement — no full offscreen rebuild needed
+        if (changed) updateCellsRegion(cell.ix, cell.iz, brushRadiusRef.current);
+        // dirtyRef already set above — GPU blit handles the update
       }
     }
   }, []);
@@ -485,7 +459,7 @@ export default function TierPainterView({ token, onBack }) {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     viewportRef.current.zoom = Math.max(0.1, Math.min(40, viewportRef.current.zoom * factor));
-    cellsDirtyRef.current = true; dirtyRef.current = true;
+    dirtyRef.current = true; // drawImage handles zoom transform — no cell iteration
   }, []);
 
   // ── Map slot operations ───────────────────────────────────────────────────
@@ -537,7 +511,7 @@ export default function TierPainterView({ token, onBack }) {
       // Backwards compatible: old format stored raw polygons array
       if (Array.isArray(parsed)) {
         modelRef.current?.loadPolygons(parsed);
-        cellsDirtyRef.current = true; dirtyRef.current = true;
+        rebuildCellsCanvas(); dirtyRef.current = true;
         setActiveMap(mapName);
         setMapStatus(`Loaded "${mapName}".`);
       } else if (parsed && parsed.polygons) {
@@ -550,6 +524,7 @@ export default function TierPainterView({ token, onBack }) {
           try {
             modelRef.current.loadPolygons(parsed.polygons);
             pendingPolygonsRef.current = null;
+            rebuildCellsCanvas(); dirtyRef.current = true;
             setMapStatus(`Loaded "${mapName}".`);
           } catch (e) {
             setMapStatus('Load failed: ' + String(e));
@@ -624,12 +599,12 @@ export default function TierPainterView({ token, onBack }) {
   function handleClear() {
     if (!window.confirm('Clear the entire canvas?')) return;
     modelRef.current?.clear();
-    cellsDirtyRef.current = true; dirtyRef.current = true;
+    rebuildCellsCanvas(); dirtyRef.current = true;
   }
 
   function handleUndo() {
     modelRef.current?.undo();
-    cellsDirtyRef.current = true; dirtyRef.current = true;
+    rebuildCellsCanvas(); dirtyRef.current = true;
   }
 
   function handlePresetChange(e) {
@@ -699,7 +674,7 @@ export default function TierPainterView({ token, onBack }) {
             {Array.from({ length: totalTiers }, (_, i) => (
               <button
                 key={i}
-                onClick={() => { setTierIdx(i); cellsDirtyRef.current = true; dirtyRef.current = true; }}
+                onClick={() => { tierIdxRef.current = i; setTierIdx(i); rebuildCellsCanvas(); dirtyRef.current = true; }}
                 style={{
                   ...styles.tierBtn,
                   background: tierColor(i, i === tierIdx),
