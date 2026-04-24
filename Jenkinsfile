@@ -32,6 +32,9 @@ pipeline {
                     // Encryption key for stored refresh tokens
                     string(credentialsId: 'OVERKILL_APP_SECRET',                   variable: 'APP_SECRET'),
                 ]) {
+                    // Write frontend/.env.production (not a secret, just the relative API path)
+                    sh 'echo "VITE_API_BASE_URL=/api" > frontend/.env.production'
+
                     // Write backend/.env.production from Jenkins secrets
                     sh '''
 cat > backend/.env.production <<EOF
@@ -75,8 +78,8 @@ EOF
 
     post {
         always {
-            // Remove the env file so secrets don't sit on disk
-            sh 'rm -f backend/.env.production'
+            // Remove the env files so secrets don't sit on disk
+            sh 'rm -f backend/.env.production frontend/.env.production'
         }
         success {
             echo '✅ OverKill deployment successful — overkilldayz.com is live.'
