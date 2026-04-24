@@ -4,5 +4,6 @@ export const USER_KEY = 'overkilldevelopment_username';
 export const STEAM64_KEY = 'overkilldevelopment_steam64_id';
 export const DISCORD_USER_ID_KEY = 'overkilldevelopment_discord_user_id';
 export const DISCORD_USERNAME_KEY = 'overkilldevelopment_discord_username';
+export const GITHUB_USERNAME_KEY = 'overkilldevelopment_github_username';
 export const ACCOUNT_SETUP_KEY = 'overkilldevelopment_account_setup_complete';
 export const EMAIL_VERIFIED_KEY = 'overkilldevelopment_email_verified';

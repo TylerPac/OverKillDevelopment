@@ -4,6 +4,7 @@ import {
   DISCORD_USER_ID_KEY,
   DISCORD_USERNAME_KEY,
   EMAIL_VERIFIED_KEY,
+  GITHUB_USERNAME_KEY,
   REFRESH_TOKEN_KEY,
   STEAM64_KEY,
   TOKEN_KEY,
@@ -18,6 +19,8 @@ export default function useSessionState(onSessionExpired) {
   const [steam64Id, setSteam64Id] = useState(() => localStorage.getItem(STEAM64_KEY) || '');
   const [discordUserId, setDiscordUserId] = useState(() => localStorage.getItem(DISCORD_USER_ID_KEY) || '');
   const [discordUsername, setDiscordUsername] = useState(() => localStorage.getItem(DISCORD_USERNAME_KEY) || '');
+  const [githubUsername, setGithubUsername] = useState(() => localStorage.getItem(GITHUB_USERNAME_KEY) || '');
+  const [githubReposByProduct, setGithubReposByProduct] = useState({});
   const [accountSetupComplete, setAccountSetupComplete] = useState(() => localStorage.getItem(ACCOUNT_SETUP_KEY) === 'true');
   const [emailVerified, setEmailVerified] = useState(() => localStorage.getItem(EMAIL_VERIFIED_KEY) === 'true');
 
@@ -70,6 +73,7 @@ export default function useSessionState(onSessionExpired) {
     localStorage.removeItem(STEAM64_KEY);
     localStorage.removeItem(DISCORD_USER_ID_KEY);
     localStorage.removeItem(DISCORD_USERNAME_KEY);
+    localStorage.removeItem(GITHUB_USERNAME_KEY);
     localStorage.removeItem(EMAIL_VERIFIED_KEY);
     localStorage.removeItem(ACCOUNT_SETUP_KEY);
 
@@ -78,7 +82,8 @@ export default function useSessionState(onSessionExpired) {
     setSteam64Id('');
     setDiscordUserId('');
     setDiscordUsername('');
-    setEmailVerified(false);
+    setGithubUsername('');
+    setGithubReposByProduct({});
     setAccountSetupComplete(false);
   }
 
@@ -93,15 +98,19 @@ export default function useSessionState(onSessionExpired) {
     const nextSteam64 = me?.steam64Id || '';
     const nextDiscordUserId = me?.discordUserId || '';
     const nextDiscordUsername = me?.discordUsername || '';
+    const nextGithubUsername = me?.githubUsername || '';
 
     setCurrentUser(nextUser);
     setSteam64Id(nextSteam64);
     setDiscordUserId(nextDiscordUserId);
     setDiscordUsername(nextDiscordUsername);
+    setGithubUsername(nextGithubUsername);
+    setGithubReposByProduct(me?.githubReposByProduct || {});
     localStorage.setItem(USER_KEY, nextUser);
     localStorage.setItem(STEAM64_KEY, nextSteam64);
     localStorage.setItem(DISCORD_USER_ID_KEY, nextDiscordUserId);
     localStorage.setItem(DISCORD_USERNAME_KEY, nextDiscordUsername);
+    localStorage.setItem(GITHUB_USERNAME_KEY, nextGithubUsername);
   }
 
   return {
@@ -110,6 +119,8 @@ export default function useSessionState(onSessionExpired) {
     steam64Id,
     discordUserId,
     discordUsername,
+    githubUsername,
+    githubReposByProduct,
     accountSetupComplete,
     emailVerified,
     authenticated,

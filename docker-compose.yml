@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8
+    container_name: overkill-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - overkill_mysql_data:/var/lib/mysql
+    networks:
+      - overkill_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    image: overkill-backend:latest
+    container_name: overkill-backend
+    restart: unless-stopped
+    env_file: ./backend/.env.production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - overkill_net
+
+  frontend:
+    build:
+      context: ./frontend
+    image: overkill-frontend:latest
+    container_name: overkill-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    networks:
+      - overkill_net
+
+networks:
+  overkill_net:
+    name: overkill_net
+
+volumes:
+  overkill_mysql_data:

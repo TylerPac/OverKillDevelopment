@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useSessionState from './hooks/useSessionState';
-import { getDiscordLinkUrl, getSteamLoginUrl } from './services/authService';
-import { callProtectedText, downloadProductBlob } from './services/apiClient';
+import { getDiscordLinkUrl, getGithubLinkUrl, getSteamLoginUrl } from './services/authService';
+import { callProtectedText, downloadProductBlob, getProductDownloadLink } from './services/apiClient';
 import {
   createCartCheckoutSession,
   createCheckoutSession,
@@ -10,7 +10,6 @@ import {
 } from './services/shopService';
 import AuthView from './views/AuthView';
 import CartView from './views/CartView';
-import CustomerView from './views/CustomerView';
 import DashboardView from './views/DashboardView';
 import HomeView from './views/HomeView';
 import { PrivacyView, RefundView, TermsView } from './views/PolicyViews';
@@ -35,6 +34,14 @@ export default function App() {
     setView('home');
     setStatus(message);
   });
+
+
+  // Ensure products are loaded on home and shop views
+  useEffect(() => {
+    if ((view === 'home' || view === 'shop') && products.length === 0 && !shopLoading) {
+      loadShopData();
+    }
+  }, [view, products.length, shopLoading]);
 
   const paidOrders = useMemo(
     () => orders.filter((order) => String(order.status || '').toUpperCase() === 'PAID'),
@@ -180,6 +187,60 @@ export default function App() {
   }, [session]);
 
   useEffect(() => {
+    const path = window.location.pathname;
+    if (path !== '/github-callback') {
+      return;
+    }
+
+    const search = new URLSearchParams(window.location.search);
+    const statusFromUrl = search.get('status');
+    const errorFromUrl = search.get('error');
+    const githubUsernameFromUrl = search.get('githubUsername') || '';
+
+    async function completeCallback() {
+      if (!session.token) {
+        setView('auth');
+        setStatus('GitHub link failed: sign in first.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      if (errorFromUrl) {
+        setView('dashboard');
+        setStatus(`GitHub link failed: ${errorFromUrl}`);
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      if (statusFromUrl !== 'github_linked') {
+        setView('dashboard');
+        setStatus('GitHub link failed: missing callback data.');
+        window.history.replaceState({}, '', '/');
+        return;
+      }
+
+      setLoading(true);
+      try {
+        await session.loadAuthProfile(session.token);
+        setView('dashboard');
+        setStatus(
+          githubUsernameFromUrl
+            ? `GitHub account linked successfully: ${githubUsernameFromUrl}.`
+            : 'GitHub account linked successfully.',
+        );
+      } catch (error) {
+        setView('dashboard');
+        setStatus(`GitHub link failed: ${error.message}`);
+      } finally {
+        setLoading(false);
+        window.history.replaceState({}, '', '/');
+      }
+    }
+
+    completeCallback();
+  }, [session]);
+
+  useEffect(() => {
     const search = new URLSearchParams(window.location.search);
     const checkout = search.get('checkout');
     if (!checkout) {
@@ -222,6 +283,24 @@ export default function App() {
       window.location.assign(url);
     } catch (error) {
       setStatus(`Discord link failed: ${error.message}`);
+      setLoading(false);
+    }
+  }
+
+  async function startGithubLink() {
+    if (!session.authenticated || !session.token) {
+      setView('auth');
+      setStatus('Sign in with Steam before linking GitHub.');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('Redirecting to GitHub...');
+    try {
+      const url = await getGithubLinkUrl(session.token);
+      window.location.assign(url);
+    } catch (error) {
+      setStatus(`GitHub link failed: ${error.message}`);
       setLoading(false);
     }
   }
@@ -341,6 +420,15 @@ export default function App() {
     setStatus('Preparing your download...');
 
     try {
+      // Try link-based download first (e.g. external URL configured per product)
+      const linkUrl = await getProductDownloadLink(productId, session.token);
+      if (linkUrl) {
+        window.open(linkUrl, '_blank', 'noopener,noreferrer');
+        setStatus('Opening download link...');
+        return;
+      }
+
+      // Fall back to zip blob download
       const { blob, fileName } = await downloadProductBlob(productId, session.token);
 
       const objectUrl = URL.createObjectURL(blob);
@@ -439,12 +527,12 @@ export default function App() {
       return;
     }
 
-    setView('customer');
+    setView('dashboard');
     loadCustomerData();
   }
 
   if (view === 'tier-painter' && session.authenticated) {
-    return <TierPainterView token={session.token} onBack={() => setView('customer')} />;
+    return <TierPainterView token={session.token} onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -470,8 +558,7 @@ export default function App() {
           </button>
           {session.authenticated ? (
             <>
-              <button type="button" onClick={() => setView('dashboard')} style={navBtnStyle}>Dashboard</button>
-              <button type="button" onClick={openCustomer} style={navBtnStyle}>Customer</button>
+              <button type="button" onClick={openCustomer} style={navBtnStyle}>Dashboard</button>
               <button type="button" onClick={signOut} style={{ ...navBtnStyle, color: '#f88', borderColor: '#633' }}>Log Out</button>
             </>
           ) : (
@@ -483,29 +570,34 @@ export default function App() {
       {/* ── Page content ─────────────────────────────────────────────── */}
       <main style={{ flex: 1, maxWidth: 860, width: '100%', margin: '0 auto', padding: '1.75rem 1.5rem' }}>
 
-      {view === 'home' && <HomeView />}
+      {view === 'home' && (
+        <HomeView
+          authenticated={session.authenticated}
+          accountSetupComplete={session.accountSetupComplete}
+          shopLoading={shopLoading}
+          products={products}
+          orders={orders}
+          cart={cart}
+          onBuy={handleBuy}
+          onDownload={handleDownload}
+          onViewProduct={openProduct}
+          onAddToCart={addToCart}
+        />
+      )}
       {view === 'auth' && !session.authenticated && (
         <AuthView loading={loading} onStartSteamSignIn={startSteamSignIn} />
       )}
       {view === 'dashboard' && session.authenticated && (
         <DashboardView
           currentUser={session.currentUser}
-          sessionId={session.sessionId}
-          accountSetupComplete={session.accountSetupComplete}
-          emailVerified={session.emailVerified}
-          steam64Id={session.steam64Id}
           discordUserId={session.discordUserId}
           discordUsername={session.discordUsername}
+          githubUsername={session.githubUsername}
+          githubReposByProduct={session.githubReposByProduct}
           loading={loading}
           authenticated={session.authenticated}
-          protectedData={protectedData}
           onStartDiscordLink={startDiscordLink}
-          onProtectedHello={() => handleProtectedRequest('/hello')}
-          onProtectedTest={() => handleProtectedRequest('/test')}
-        />
-      )}
-      {view === 'customer' && session.authenticated && (
-        <CustomerView
+          onStartGithubLink={startGithubLink}
           shopLoading={shopLoading}
           paidOrders={paidOrders}
           onDownload={handleDownload}

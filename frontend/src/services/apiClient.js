@@ -30,6 +30,22 @@ export async function callProtectedText(path, token) {
   return text;
 }
 
+export async function getProductDownloadLink(productId, token) {
+  const response = await fetch(`${apiBase}/shop/download-link/${encodeURIComponent(productId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  return data.url || null;
+}
+
 export async function downloadProductBlob(productId, token) {
   const response = await fetch(`${apiBase}/shop/download/${encodeURIComponent(productId)}`, {
     method: 'GET',

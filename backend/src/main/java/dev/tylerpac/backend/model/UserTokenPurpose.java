@@ -5,5 +5,6 @@ public enum UserTokenPurpose {
     PASSWORD_RESET,
     REFRESH_SESSION,
     DISCORD_LINK,
-    GOOGLE_LINK
+    GOOGLE_LINK,
+    GITHUB_LINK
 }

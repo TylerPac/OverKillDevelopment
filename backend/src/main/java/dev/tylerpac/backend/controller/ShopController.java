@@ -2,6 +2,8 @@ package dev.tylerpac.backend.controller;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -180,6 +182,26 @@ public class ShopController {
             ));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+        }
+    }
+
+    @GetMapping("/download-link/{productId}")
+    public ResponseEntity<?> getDownloadLink(@PathVariable String productId, Principal principal) {
+        try {
+            User user = requireUser(principal);
+            Optional<String> link = shopDownloadService.findDownloadLink(user, productId);
+            if (link.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(Map.of("url", link.get()));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "account_not_setup", "purchase_required" ->
+                    ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                case "invalid_product" ->
+                    ResponseEntity.badRequest().body(ex.getMessage());
+                default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+            };
         }
     }
 

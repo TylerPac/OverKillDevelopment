@@ -7,6 +7,7 @@ export default function GoogleSheetsImportView({ token, onClose }) {
     try { return JSON.parse(localStorage.getItem('google_templates') || '[]'); } catch (e) { return []; }
   });
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, name }
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Load server-side registered templates on mount
   useEffect(() => {
@@ -114,7 +115,26 @@ export default function GoogleSheetsImportView({ token, onClose }) {
   return (
     <div style={styles.backdrop} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0, marginBottom: 14 }}>Import Loot Table (Google Sheets)</h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <h3 style={{ margin: 0 }}>Import Loot Table (Google Sheets)</h3>
+          <div style={{ position: 'relative' }}>
+            <button
+              title="Settings"
+              onClick={() => setSettingsOpen(v => !v)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: settingsOpen ? '#7abaff' : '#aaa', padding: 4, lineHeight: 0 }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.01 7.01 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4a.484.484 0 0 0-.48.41l-.36 2.54a7.01 7.01 0 0 0-1.62.94l-2.39-.96a.477.477 0 0 0-.59.22L2.64 8.47a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.3.59.22l2.39-.96c.5.36 1.04.67 1.62.94l.36 2.54c.05.24.27.41.48.41h4c.24 0 .44-.17.47-.41l.36-2.54a7.01 7.01 0 0 0 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+              </svg>
+            </button>
+            {settingsOpen && (
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: '#1a1a2e', border: '1px solid #444', borderRadius: 6, padding: 8, zIndex: 10, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button style={styles.btn} onClick={() => { setSettingsOpen(false); linkGoogle(); }}>Link Google Account</button>
+                <button style={{ ...styles.btn, background: '#2a4a7a' }} onClick={() => { setSettingsOpen(false); copyTemplate(); }}>Copy Template</button>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Delete confirmation dialog */}
         {confirmDelete && (
@@ -135,12 +155,6 @@ export default function GoogleSheetsImportView({ token, onClose }) {
           </div>
         )}
 
-        {/* Top action bar */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <button style={styles.btn} onClick={linkGoogle}>Link Google Account</button>
-          <button style={{ ...styles.btn, background: '#2a4a7a' }} onClick={copyTemplate}>Copy Template</button>
-        </div>
-
         {/* Saved templates list */}
         {savedTemplates.length > 0 && (
           <section style={{ marginBottom: 10 }}>
@@ -148,7 +162,13 @@ export default function GoogleSheetsImportView({ token, onClose }) {
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', maxHeight: 200, overflow: 'auto' }}>
               {savedTemplates.map((s) => (
                 <li key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                  <a
+                    href={`https://docs.google.com/spreadsheets/d/${s.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#7abaff', textDecoration: 'none' }}
+                    title="Open in Google Sheets"
+                  >{s.name}</a>
                   <button style={styles.btn} onClick={() => downloadTemplate(s)}>Download</button>
                   <button style={{ ...styles.btn, background: '#600' }} onClick={() => setConfirmDelete(s)}>Delete</button>
                 </li>

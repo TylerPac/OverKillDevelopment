@@ -35,6 +35,12 @@ public class User {
     @Column(nullable = true)
     private String discordUsername;
 
+    @Column(nullable = true, unique = true)
+    private String githubUserId;
+
+    @Column(nullable = true)
+    private String githubUsername;
+
     @Column(nullable = false)
     private boolean emailVerified = false;
 
@@ -92,6 +98,10 @@ public class User {
     public void setDiscordUserId(String discordUserId) { this.discordUserId = discordUserId; }
     public String getDiscordUsername() { return discordUsername; }
     public void setDiscordUsername(String discordUsername) { this.discordUsername = discordUsername; }
+    public String getGithubUserId() { return githubUserId; }
+    public void setGithubUserId(String githubUserId) { this.githubUserId = githubUserId; }
+    public String getGithubUsername() { return githubUsername; }
+    public void setGithubUsername(String githubUsername) { this.githubUsername = githubUsername; }
     public boolean isEmailVerified() { return emailVerified; }
     public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
     public String getStripeCustomerId() { return stripeCustomerId; }

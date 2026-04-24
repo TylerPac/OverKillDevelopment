@@ -11,6 +11,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
     Optional<User> findBySteam64Id(String steam64Id);
     Optional<User> findByDiscordUserId(String discordUserId);
+    Optional<User> findByGithubUserId(String githubUserId);
     Optional<User> findByStripeCustomerId(String stripeCustomerId);
     boolean existsByEmail(String email);
 }

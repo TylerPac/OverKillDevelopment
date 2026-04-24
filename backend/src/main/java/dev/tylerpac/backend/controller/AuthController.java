@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,11 +24,13 @@ import dev.tylerpac.backend.dto.RefreshTokenRequest;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.model.UserGoogleCredential;
 import dev.tylerpac.backend.model.UserTokenPurpose;
+import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserGoogleCredentialRepository;
 import dev.tylerpac.backend.repo.UserRepository;
 import dev.tylerpac.backend.security.JwtUtil;
 import dev.tylerpac.backend.service.CryptoUtil;
 import dev.tylerpac.backend.service.DiscordOAuthService;
+import dev.tylerpac.backend.service.GitHubOAuthService;
 import dev.tylerpac.backend.service.GoogleOAuthService;
 import dev.tylerpac.backend.service.SheetsParsingService;
 import dev.tylerpac.backend.service.SteamAuthService;
@@ -41,41 +44,50 @@ import tools.jackson.databind.JsonNode;
 public class AuthController {
 
     private final UserRepository userRepository;
+    private final ShopOrderRepository shopOrderRepository;
     private final JwtUtil jwtUtil;
     private final UserTokenService userTokenService;
     private final SteamAuthService steamAuthService;
     private final DiscordOAuthService discordOAuthService;
+    private final GitHubOAuthService gitHubOAuthService;
     private final UserGoogleCredentialRepository userGoogleCredentialRepository;
     private final CryptoUtil cryptoUtil;
     private final GoogleOAuthService googleOAuthService;
     private final SheetsParsingService sheetsParsingService;
+    private final Environment environment;
     private final String frontendBaseUrl;
     private final long accessTokenTtlMinutes;
     private final long refreshTokenTtlDays;
 
     public AuthController(
         UserRepository userRepository,
+        ShopOrderRepository shopOrderRepository,
         JwtUtil jwtUtil,
         UserTokenService userTokenService,
         SteamAuthService steamAuthService,
         DiscordOAuthService discordOAuthService,
+        GitHubOAuthService gitHubOAuthService,
         UserGoogleCredentialRepository userGoogleCredentialRepository,
         CryptoUtil cryptoUtil,
         GoogleOAuthService googleOAuthService,
         SheetsParsingService sheetsParsingService,
+        Environment environment,
         @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl,
         @Value("${app.auth.access-token-ttl-minutes:15}") long accessTokenTtlMinutes,
         @Value("${app.auth.refresh-token-ttl-days:7}") long refreshTokenTtlDays
     ) {
         this.userRepository = userRepository;
+        this.shopOrderRepository = shopOrderRepository;
         this.jwtUtil = jwtUtil;
         this.userTokenService = userTokenService;
         this.steamAuthService = steamAuthService;
         this.discordOAuthService = discordOAuthService;
+        this.gitHubOAuthService = gitHubOAuthService;
         this.userGoogleCredentialRepository = userGoogleCredentialRepository;
         this.cryptoUtil = cryptoUtil;
         this.googleOAuthService = googleOAuthService;
         this.sheetsParsingService = sheetsParsingService;
+        this.environment = environment;
         this.frontendBaseUrl = frontendBaseUrl;
         this.accessTokenTtlMinutes = accessTokenTtlMinutes;
         this.refreshTokenTtlDays = refreshTokenTtlDays;
@@ -214,11 +226,104 @@ public class AuthController {
         }
     }
 
+    @GetMapping("/github/link-url")
+    public ResponseEntity<?> githubLinkUrl(HttpServletRequest request) {
+        User user = resolveCurrentUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("unauthorized");
+        }
+
+        String state = userTokenService.issueToken(
+            user,
+            UserTokenPurpose.GITHUB_LINK,
+            Duration.ofMinutes(10)
+        );
+
+        String url = gitHubOAuthService.buildLinkUrl(state);
+        return ResponseEntity.ok(Map.of("url", url));
+    }
+
+    @GetMapping("/github/callback")
+    public ResponseEntity<?> githubCallback(
+        @RequestParam("code") String code,
+        @RequestParam("state") String state
+    ) {
+        Optional<User> userOpt = userTokenService.consumeToken(state, UserTokenPurpose.GITHUB_LINK);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("invalid_or_expired_state"))
+                .build();
+        }
+
+        try {
+            GitHubOAuthService.GitHubProfile profile = gitHubOAuthService.fetchProfileFromAuthorizationCode(code);
+            User user = userOpt.get();
+
+            Optional<User> existingOwner = userRepository.findByGithubUserId(profile.id());
+            if (existingOwner.isPresent() && !existingOwner.get().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FOUND)
+                    .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("github_account_already_linked"))
+                    .build();
+            }
+
+            user.setGithubUserId(profile.id());
+            user.setGithubUsername(profile.login());
+            userRepository.save(user);
+
+            String redirect = frontendBaseUrl
+                + "/github-callback?status=" + urlEncode("github_linked")
+                + "&githubUsername=" + urlEncode(profile.login());
+            return ResponseEntity.status(HttpStatus.FOUND).header("Location", redirect).build();
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode(ex.getMessage()))
+                .build();
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode(ex.getMessage()))
+                .build();
+        } catch (DataIntegrityViolationException ex) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("github_account_already_linked"))
+                .build();
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("internal_error"))
+                .build();
+        }
+    }
+
     @GetMapping("/me")
     public ResponseEntity<?> me(HttpServletRequest request) {
         User user = resolveCurrentUser(request);
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("unauthorized");
+        }
+
+        // Get all paid orders for this user
+        java.util.List<dev.tylerpac.backend.model.ShopOrder> orders = shopOrderRepository.findByUserOrderByCreatedAtDesc(user);
+        java.util.Set<String> ownedProducts = new java.util.HashSet<>();
+        for (dev.tylerpac.backend.model.ShopOrder order : orders) {
+            if ("PAID".equalsIgnoreCase(order.getStatus())) {
+                ownedProducts.add(order.getProductId());
+            }
+        }
+
+        // For each owned product, get the repo URLs
+        java.util.Map<String, java.util.List<String>> githubReposByProduct = new java.util.HashMap<>();
+        for (String productId : ownedProducts) {
+            String prop = "app.shop.github-repo." + productId;
+            String repoList = environment.getProperty(prop, "");
+            if (!repoList.isBlank()) {
+                java.util.List<String> links = new java.util.ArrayList<>();
+                for (String repo : repoList.split(",")) {
+                    repo = repo.trim();
+                    if (!repo.isEmpty() && repo.contains("/")) {
+                        links.add("https://github.com/" + repo);
+                    }
+                }
+                if (!links.isEmpty()) githubReposByProduct.put(productId, links);
+            }
         }
 
         return ResponseEntity.ok(Map.of(
@@ -227,8 +332,11 @@ public class AuthController {
             "steam64Id", user.getSteam64Id(),
             "discordUserId", user.getDiscordUserId() == null ? "" : user.getDiscordUserId(),
             "discordUsername", user.getDiscordUsername() == null ? "" : user.getDiscordUsername(),
+            "githubUserId", user.getGithubUserId() == null ? "" : user.getGithubUserId(),
+            "githubUsername", user.getGithubUsername() == null ? "" : user.getGithubUsername(),
             "premiumUser", user.isPremiumUser(),
-            "subscriptionStatus", user.getStripeSubscriptionStatus() == null ? "none" : user.getStripeSubscriptionStatus()
+            "subscriptionStatus", user.getStripeSubscriptionStatus() == null ? "none" : user.getStripeSubscriptionStatus(),
+            "githubReposByProduct", githubReposByProduct
         ));
     }
 

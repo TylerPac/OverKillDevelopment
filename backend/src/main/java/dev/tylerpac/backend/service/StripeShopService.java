@@ -53,6 +53,7 @@ public class StripeShopService {
     private final ProcessedStripeEventRepository processedStripeEventRepository;
     private final PurchaseEmailService purchaseEmailService;
     private final UserRepository userRepository;
+    private final GitHubRepoService gitHubRepoService;
     private final String currency;
     private final String successUrl;
     private final String cancelUrl;
@@ -64,6 +65,7 @@ public class StripeShopService {
         ProcessedStripeEventRepository processedStripeEventRepository,
         PurchaseEmailService purchaseEmailService,
         UserRepository userRepository,
+        GitHubRepoService gitHubRepoService,
         @Value("${app.shop.currency:usd}") String currency,
         @Value("${app.shop.success-url}") String successUrl,
         @Value("${app.shop.cancel-url}") String cancelUrl,
@@ -75,6 +77,7 @@ public class StripeShopService {
         this.processedStripeEventRepository = processedStripeEventRepository;
         this.purchaseEmailService = purchaseEmailService;
         this.userRepository = userRepository;
+        this.gitHubRepoService = gitHubRepoService;
         this.currency = currency;
         this.successUrl = normalizeCheckoutBaseUrl(successUrl);
         this.cancelUrl = normalizeCheckoutBaseUrl(cancelUrl);
@@ -469,6 +472,7 @@ public class StripeShopService {
             order.setStripePaymentIntentId(session.getPaymentIntent());
             shopOrderRepository.save(order);
             purchaseEmailService.sendOrderPaid(user, order);
+            gitHubRepoService.grantRepoAccess(user.getGithubUsername(), product.getId());
         }
     }
 
@@ -487,6 +491,7 @@ public class StripeShopService {
 
         if (STATUS_PAID.equals(nextStatus)) {
             purchaseEmailService.sendOrderPaid(order.getUser(), order);
+            gitHubRepoService.grantRepoAccess(order.getUser().getGithubUsername(), order.getProductId());
         } else if (STATUS_FAILED.equals(nextStatus)) {
             purchaseEmailService.sendOrderFailed(order.getUser(), order);
         }

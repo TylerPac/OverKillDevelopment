@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -21,13 +23,34 @@ public class ShopDownloadService {
 
     private final ShopOrderRepository shopOrderRepository;
     private final Path downloadRoot;
+    private final Environment env;
 
     public ShopDownloadService(
         ShopOrderRepository shopOrderRepository,
-        @Value("${app.shop.download-root:downloads}") String downloadRoot
+        @Value("${app.shop.download-root:downloads}") String downloadRoot,
+        Environment env
     ) {
         this.shopOrderRepository = shopOrderRepository;
         this.downloadRoot = Paths.get(downloadRoot).toAbsolutePath().normalize();
+        this.env = env;
+    }
+
+    public Optional<String> findDownloadLink(User user, String productId) {
+        if (!StringUtils.hasText(user.getSteam64Id())) {
+            throw new IllegalArgumentException("account_not_setup");
+        }
+
+        if (!StringUtils.hasText(productId)) {
+            throw new IllegalArgumentException("invalid_product");
+        }
+
+        boolean purchased = shopOrderRepository.existsByUserAndProductIdAndStatusIgnoreCase(user, productId, STATUS_PAID);
+        if (!purchased) {
+            throw new IllegalArgumentException("purchase_required");
+        }
+
+        String link = env.getProperty("app.shop.download-link." + productId);
+        return Optional.ofNullable(link).filter(StringUtils::hasText);
     }
 
     public DownloadAsset loadPaidProductAsset(User user, String productId) {

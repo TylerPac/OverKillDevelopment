@@ -20,6 +20,18 @@ export async function getDiscordLinkUrl(token) {
   return response.url;
 }
 
+export async function getGithubLinkUrl(token) {
+  const response = await callJson('/auth/github/link-url', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response?.url) {
+    throw new Error('github_link_url_missing');
+  }
+  return response.url;
+}
+
 export async function getAuthProfile(token) {
   return callJson('/auth/me', {
     headers: {

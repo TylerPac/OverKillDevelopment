@@ -9,14 +9,18 @@ export default function ShopView({
   onDownload,
   onViewProduct,
   onAddToCart,
+  showHeading = true,
 }) {
   return (
-    <section style={{ marginTop: '1rem' }}>
-      <h2>Shop</h2>
-      <p style={{ color: '#888', marginBottom: '1rem' }}>
-        Click a product to learn more, or add it to your cart.
-      </p>
-
+    <section style={{ marginTop: showHeading ? '1rem' : 0 }}>
+      {showHeading && (
+        <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', textAlign: 'center', marginBottom: '1.2rem' }}>
+          <h2 style={{ marginBottom: '0.7rem', color: '#cde3ff' }}>Shop</h2>
+          <p style={{ color: '#888', marginBottom: 0, fontSize: '1.08rem', lineHeight: 1.6 }}>
+            Click a product to learn more, or add it to your cart.
+          </p>
+        </div>
+      )}
       {authenticated && !accountSetupComplete && (
         <section style={{
           background: '#1e1e2e', border: '1px solid #333', borderRadius: 8,
@@ -28,54 +32,65 @@ export default function ShopView({
         </section>
       )}
 
-      <div style={{ display: 'grid', gap: '0.75rem' }}>
-        {products.map((product) => {
-          const inCart = cart.includes(product.id);
-          return (
-            <article
-              key={product.id}
-              onClick={() => onViewProduct(product.id)}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4a4a7a'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#333'; }}
-              style={{
-                background: '#1e1e2e', border: '1px solid #333',
-                borderRadius: 8, padding: '1rem', maxWidth: 560,
-                cursor: 'pointer', transition: 'border-color 0.15s',
-              }}
-            >
-              <h3 style={{ marginBottom: '0.35rem' }}>{product.name}</h3>
-              <p style={{ color: '#aaa', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{product.description}</p>
-              <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem', color: '#cdf' }}>
-                <strong>{(product.amountCents / 100).toFixed(2)} {String(product.currency || '').toUpperCase()}</strong>
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  disabled={inCart}
-                  onClick={(e) => { e.stopPropagation(); onAddToCart(product.id); }}
-                  style={{
-                    background: inCart ? '#1e3a1e' : '#1e2a4a',
-                    border: `1px solid ${inCart ? '#3a7a3a' : '#3a5a8e'}`,
-                    color: inCart ? '#8f8' : '#adf',
-                    borderRadius: 4, padding: '4px 12px',
-                    cursor: inCart ? 'default' : 'pointer',
-                    fontSize: '0.82rem', fontFamily: 'inherit',
-                  }}
-                >
-                  {inCart ? '✓ In Cart' : '+ Add to Cart'}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onViewProduct(product.id); }}
-                  style={{ padding: '4px 12px', fontSize: '0.82rem' }}
-                >
-                  View Details →
-                </button>
-              </div>
-            </article>
-          );
-        })}
-        {!products.length && <p style={{ color: '#888' }}>No products configured.</p>}
+      <div style={{ width: '100%' }}>
+        <div style={{ width: '100%', maxWidth: 760, margin: '0 auto' }}>
+          <div style={{ display: 'grid', gap: '1.25rem' }}>
+          {products.map((product) => {
+            const inCart = cart.includes(product.id);
+            const owned = orders.some(
+              (o) => o.productId === product.id && String(o.status || '').toUpperCase() === 'PAID'
+            );
+            return (
+              <article
+                key={product.id}
+                onClick={() => onViewProduct(product.id)}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4a4a7a'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#333'; }}
+                style={{
+                  background: '#1e1e2e', border: '1px solid #333',
+                  borderRadius: 8, padding: '1.5rem 2.25rem', width: '100%', minWidth: 340,
+                  cursor: 'pointer', transition: 'border-color 0.15s',
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ width: '100%' }}>
+                  <h3 style={{ marginBottom: '0.35rem', fontSize: '1.22rem' }}>{product.name}</h3>
+                  <p style={{ color: '#aaa', fontSize: '1.05rem', marginBottom: '0.5rem', minHeight: 24 }}>{product.description}</p>
+                  <p style={{ fontSize: '1.08rem', marginBottom: '0.75rem', color: '#cdf', fontWeight: 600 }}>
+                    {(product.amountCents / 100).toFixed(2)} {String(product.currency || '').toUpperCase()}
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto' }}>
+                  <button
+                    type="button"
+                    disabled={inCart || owned}
+                    onClick={(e) => { e.stopPropagation(); onAddToCart(product.id); }}
+                    style={{
+                      background: owned ? '#2a2a2a' : inCart ? '#1e3a1e' : '#1e2a4a',
+                      border: `1px solid ${owned ? '#555' : inCart ? '#3a7a3a' : '#3a5a8e'}`,
+                      color: owned ? '#666' : inCart ? '#8f8' : '#adf',
+                      borderRadius: 4, padding: '6px 18px',
+                      cursor: (inCart || owned) ? 'default' : 'pointer',
+                      fontSize: '1rem', fontFamily: 'inherit',
+                    }}
+                  >
+                    {owned ? '✓ Owned' : inCart ? '✓ In Cart' : '+ Add to Cart'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onViewProduct(product.id); }}
+                    style={{ padding: '6px 18px', fontSize: '1rem' }}
+                  >
+                    View Details →
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {!products.length && <p style={{ color: '#888' }}>No products configured.</p>}
+        </div>
+      </div>
       </div>
 
       {authenticated && (
