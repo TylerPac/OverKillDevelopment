@@ -43,7 +43,7 @@ public class GoogleOAuthService {
     public GoogleOAuthService(
         @Value("${GOOGLE_CLIENT_ID:}") String clientId,
         @Value("${GOOGLE_CLIENT_SECRET:}") String clientSecret,
-        @Value("${GOOGLE_REDIRECT_URI:http://localhost:8080/auth/google/callback}") String redirectUri,
+        @Value("${GOOGLE_REDIRECT_URI:http://localhost:8080/api/google/callback}") String redirectUri,
         ObjectMapper objectMapper
     ) {
         this.clientId = clientId;
