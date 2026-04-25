@@ -108,6 +108,28 @@ public class ShopController {
         }
     }
 
+    @PostMapping("/checkout/sync")
+    public ResponseEntity<?> syncCheckoutStatus(
+        @RequestBody String sessionId,
+        Principal principal
+    ) {
+        try {
+            User user = requireUser(principal);
+            stripeShopService.syncCheckoutStatusFromSession(user, sessionId);
+            return ResponseEntity.ok("synced");
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "session_id_required", "invalid_checkout_session" ->
+                    ResponseEntity.badRequest().body(ex.getMessage());
+                case "session_user_mismatch" ->
+                    ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+            };
+        } catch (StripeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
+        }
+    }
+
     @PostMapping("/subscription/checkout-session")
     public ResponseEntity<?> createSubscriptionCheckoutSession(
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,

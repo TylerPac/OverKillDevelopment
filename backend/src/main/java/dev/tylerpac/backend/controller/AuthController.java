@@ -326,17 +326,19 @@ public class AuthController {
             }
         }
 
-        return ResponseEntity.ok(Map.of(
-            "id", user.getId(),
-            "username", user.getUsername(),
-            "steam64Id", user.getSteam64Id(),
-            "discordUserId", user.getDiscordUserId() == null ? "" : user.getDiscordUserId(),
-            "discordUsername", user.getDiscordUsername() == null ? "" : user.getDiscordUsername(),
-            "githubUserId", user.getGithubUserId() == null ? "" : user.getGithubUserId(),
-            "githubUsername", user.getGithubUsername() == null ? "" : user.getGithubUsername(),
-            "premiumUser", user.isPremiumUser(),
-            "subscriptionStatus", user.getStripeSubscriptionStatus() == null ? "none" : user.getStripeSubscriptionStatus(),
-            "githubReposByProduct", githubReposByProduct
+        return ResponseEntity.ok(Map.ofEntries(
+            Map.entry("id", user.getId()),
+            Map.entry("username", user.getUsername()),
+            Map.entry("steam64Id", user.getSteam64Id()),
+            Map.entry("discordUserId", user.getDiscordUserId() == null ? "" : user.getDiscordUserId()),
+            Map.entry("discordUsername", user.getDiscordUsername() == null ? "" : user.getDiscordUsername()),
+            Map.entry("githubUserId", user.getGithubUserId() == null ? "" : user.getGithubUserId()),
+            Map.entry("githubUsername", user.getGithubUsername() == null ? "" : user.getGithubUsername()),
+            Map.entry("emailVerified", user.isEmailVerified()),
+            Map.entry("accountSetupComplete", StringUtils.hasText(user.getSteam64Id())),
+            Map.entry("premiumUser", user.isPremiumUser()),
+            Map.entry("subscriptionStatus", user.getStripeSubscriptionStatus() == null ? "none" : user.getStripeSubscriptionStatus()),
+            Map.entry("githubReposByProduct", githubReposByProduct)
         ));
     }
 

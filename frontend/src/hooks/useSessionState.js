@@ -99,6 +99,12 @@ export default function useSessionState(onSessionExpired) {
     const nextDiscordUserId = me?.discordUserId || '';
     const nextDiscordUsername = me?.discordUsername || '';
     const nextGithubUsername = me?.githubUsername || '';
+    const nextEmailVerified = typeof me?.emailVerified === 'boolean'
+      ? me.emailVerified
+      : emailVerified;
+    const nextAccountSetupComplete = typeof me?.accountSetupComplete === 'boolean'
+      ? me.accountSetupComplete
+      : Boolean(nextSteam64);
 
     setCurrentUser(nextUser);
     setSteam64Id(nextSteam64);
@@ -106,11 +112,15 @@ export default function useSessionState(onSessionExpired) {
     setDiscordUsername(nextDiscordUsername);
     setGithubUsername(nextGithubUsername);
     setGithubReposByProduct(me?.githubReposByProduct || {});
+    setEmailVerified(nextEmailVerified);
+    setAccountSetupComplete(nextAccountSetupComplete);
     localStorage.setItem(USER_KEY, nextUser);
     localStorage.setItem(STEAM64_KEY, nextSteam64);
     localStorage.setItem(DISCORD_USER_ID_KEY, nextDiscordUserId);
     localStorage.setItem(DISCORD_USERNAME_KEY, nextDiscordUsername);
     localStorage.setItem(GITHUB_USERNAME_KEY, nextGithubUsername);
+    localStorage.setItem(EMAIL_VERIFIED_KEY, String(nextEmailVerified));
+    localStorage.setItem(ACCOUNT_SETUP_KEY, String(nextAccountSetupComplete));
   }
 
   return {

@@ -7,6 +7,7 @@ import {
   createCheckoutSession,
   getOrders,
   getProducts,
+  syncCheckoutFromSession,
 } from './services/shopService';
 import AuthView from './views/AuthView';
 import CartView from './views/CartView';
@@ -243,19 +244,45 @@ export default function App() {
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
     const checkout = search.get('checkout');
+    const sessionId = search.get('session_id');
     if (!checkout) {
       return;
     }
 
-    setView('shop');
-    if (checkout === 'success') {
-      setStatus('Payment completed. Stripe webhook will update your order status shortly.');
-    } else if (checkout === 'cancel') {
-      setStatus('Checkout canceled. No charge was made.');
+    let active = true;
+
+    async function handleCheckoutReturn() {
+      setView('shop');
+
+      if (checkout === 'success') {
+        setStatus('Payment completed. Refreshing your order...');
+
+        if (session.authenticated && session.token && sessionId) {
+          try {
+            await syncCheckoutFromSession(session.token, sessionId);
+          } catch (error) {
+            if (active) {
+              setStatus(`Payment succeeded, but order sync failed: ${error.message}`);
+            }
+          }
+        }
+
+        if (active) {
+          // Force the existing shop load effect to refetch orders and products.
+          setProducts([]);
+        }
+      } else if (checkout === 'cancel') {
+        setStatus('Checkout canceled. No charge was made.');
+      }
+
+      window.history.replaceState({}, '', '/');
     }
 
-    window.history.replaceState({}, '', '/');
-  }, [session]);
+    handleCheckoutReturn();
+    return () => {
+      active = false;
+    };
+  }, [session.authenticated, session.token]);
 
   async function startSteamSignIn() {
     setLoading(true);

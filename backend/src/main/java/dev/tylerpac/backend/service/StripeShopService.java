@@ -330,6 +330,52 @@ public class StripeShopService {
     }
 
     @Transactional
+    public void syncCheckoutStatusFromSession(User user, String sessionId) throws StripeException {
+        if (!StringUtils.hasText(sessionId)) {
+            throw new IllegalArgumentException("session_id_required");
+        }
+
+        Session session = Session.retrieve(sessionId.trim());
+        if (!"payment".equalsIgnoreCase(session.getMode())) {
+            throw new IllegalArgumentException("invalid_checkout_session");
+        }
+        if (!isCheckoutSessionOwnedByUser(session, user)) {
+            throw new IllegalArgumentException("session_user_mismatch");
+        }
+
+        String nextStatus = null;
+        if ("paid".equalsIgnoreCase(session.getPaymentStatus())) {
+            nextStatus = STATUS_PAID;
+        } else if ("expired".equalsIgnoreCase(session.getStatus())) {
+            nextStatus = STATUS_EXPIRED;
+        } else {
+            String paymentIntentId = String.valueOf(session.getPaymentIntent());
+            if (StringUtils.hasText(paymentIntentId) && !"null".equals(paymentIntentId)) {
+                PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+                if ("succeeded".equalsIgnoreCase(paymentIntent.getStatus())) {
+                    nextStatus = STATUS_PAID;
+                } else if ("canceled".equalsIgnoreCase(paymentIntent.getStatus())
+                    || "requires_payment_method".equalsIgnoreCase(paymentIntent.getStatus())) {
+                    nextStatus = STATUS_FAILED;
+                }
+            }
+        }
+
+        Map<String, String> metadata = session.getMetadata();
+        boolean cartCheckout = metadata != null && "true".equals(metadata.get("cartCheckout"));
+        if (cartCheckout) {
+            if (STATUS_PAID.equals(nextStatus)) {
+                createCartOrdersFromSession(session);
+            }
+            return;
+        }
+
+        if (nextStatus != null) {
+            updateOrderFromCheckoutSession(session, nextStatus);
+        }
+    }
+
+    @Transactional
     public void handleWebhook(String payload, String signatureHeader) throws SignatureVerificationException {
         if (!StringUtils.hasText(webhookSecret)) {
             throw new IllegalStateException("Stripe webhook secret is missing. Set APP_STRIPE_WEBHOOK_SECRET.");
@@ -467,6 +513,11 @@ public class StripeShopService {
             ShopProductResponse product = catalog().get(productId);
             if (product == null) continue;
 
+            String checkoutSessionId = session.getId() + "_" + product.getId();
+            if (shopOrderRepository.findByStripeCheckoutSessionId(checkoutSessionId).isPresent()) {
+                continue;
+            }
+
             ShopOrder order = new ShopOrder();
             order.setUser(user);
             order.setProductId(product.getId());
@@ -474,7 +525,7 @@ public class StripeShopService {
             order.setAmountCents(product.getAmountCents());
             order.setCurrency(product.getCurrency());
             order.setStatus(STATUS_PAID);
-            order.setStripeCheckoutSessionId(session.getId() + "_" + product.getId());
+            order.setStripeCheckoutSessionId(checkoutSessionId);
             order.setStripePaymentIntentId(session.getPaymentIntent());
             shopOrderRepository.save(order);
             purchaseEmailService.sendOrderPaid(user, order);
@@ -509,6 +560,38 @@ public class StripeShopService {
         processed.setEventType(event.getType());
         processed.setProcessedAt(Instant.now());
         processedStripeEventRepository.save(processed);
+    }
+
+    private boolean isCheckoutSessionOwnedByUser(Session session, User user) {
+        String clientReferenceId = session.getClientReferenceId();
+        if (StringUtils.hasText(clientReferenceId)) {
+            try {
+                if (clientReferenceId.trim().equals(String.valueOf(user.getId()))) {
+                    return true;
+                }
+            } catch (NumberFormatException ignored) {
+                // fall through to metadata/customer checks
+            }
+        }
+
+        Map<String, String> metadata = session.getMetadata();
+        if (metadata != null) {
+            String metadataUserId = metadata.get("userId");
+            if (StringUtils.hasText(metadataUserId)) {
+                try {
+                    if (metadataUserId.trim().equals(String.valueOf(user.getId()))) {
+                        return true;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // fall through to customer checks
+                }
+            }
+        }
+
+        String customerId = String.valueOf(session.getCustomer());
+        return StringUtils.hasText(customerId)
+            && !"null".equals(customerId)
+            && customerId.equals(user.getStripeCustomerId());
     }
 
     private String normalizeIdempotencyKey(User user, String idempotencyKey) {
