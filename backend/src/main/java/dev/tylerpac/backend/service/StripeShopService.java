@@ -343,10 +343,11 @@ public class StripeShopService {
         String eventType = event.getType();
 
         EventDataObjectDeserializer dataObjectDeserializer = event.getDataObjectDeserializer();
-        Optional<StripeObject> stripeObject = dataObjectDeserializer.getObject();
-        if (stripeObject.isEmpty()) {
+        StripeObject rawObject = dataObjectDeserializer.deserializeUnsafe();
+        if (rawObject == null) {
             return;
         }
+        Optional<StripeObject> stripeObject = Optional.of(rawObject);
 
         try {
             switch (eventType) {
