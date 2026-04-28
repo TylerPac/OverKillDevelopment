@@ -12,25 +12,23 @@ pipeline {
             steps {
                 withCredentials([
                     // MySQL (passed to docker-compose)
-                    string(credentialsId: 'OVERKILL_MYSQL_ROOT_PASSWORD', variable: 'MYSQL_ROOT_PASSWORD'),
-                    string(credentialsId: 'OVERKILL_MYSQL_DATABASE',      variable: 'MYSQL_DATABASE'),
-                    string(credentialsId: 'OVERKILL_MYSQL_USER',          variable: 'MYSQL_USER'),
-                    string(credentialsId: 'OVERKILL_MYSQL_PASSWORD',      variable: 'MYSQL_PASSWORD'),
+                    string(credentialsId: 'OKDEV_MYSQL_DATABASE',      variable: 'MYSQL_DATABASE'),
+                    string(credentialsId: 'OKDEV_MYSQL_USER',          variable: 'MYSQL_USER'),
+                    string(credentialsId: 'OKDEV_MYSQL_PASSWORD',      variable: 'MYSQL_PASSWORD'),
                     // Backend env
-                    string(credentialsId: 'OVERKILL_JWT_SECRET',                   variable: 'JWT_SECRET'),
-                    string(credentialsId: 'OVERKILL_STRIPE_SECRET_KEY',            variable: 'STRIPE_SECRET_KEY'),
-                    string(credentialsId: 'OVERKILL_STRIPE_WEBHOOK_SECRET',        variable: 'STRIPE_WEBHOOK_SECRET'),
-                    string(credentialsId: 'OVERKILL_DISCORD_CLIENT_ID',            variable: 'DISCORD_CLIENT_ID'),
-                    string(credentialsId: 'OVERKILL_DISCORD_CLIENT_SECRET',        variable: 'DISCORD_CLIENT_SECRET'),
-                    string(credentialsId: 'OVERKILL_GITHUB_CLIENT_ID',             variable: 'GITHUB_CLIENT_ID'),
-                    string(credentialsId: 'OVERKILL_GITHUB_CLIENT_SECRET',         variable: 'GITHUB_CLIENT_SECRET'),
-                    string(credentialsId: 'OVERKILL_GITHUB_BOT_TOKEN',             variable: 'GITHUB_BOT_TOKEN'),
-                    // Google — stored without OVERKILL_ prefix in Jenkins
-                    string(credentialsId: 'GOOGLE_CLIENT_ID',                      variable: 'GOOGLE_CLIENT_ID'),
-                    string(credentialsId: 'GOOGLE_CLIENT_SECRET',                  variable: 'GOOGLE_CLIENT_SECRET'),
-                    string(credentialsId: 'OVERKILL_GOOGLE_TEMPLATE_SPREADSHEET_ID', variable: 'GOOGLE_TEMPLATE_SPREADSHEET_ID'),
+                    string(credentialsId: 'OKDEV_JWT_SECRET',                   variable: 'JWT_SECRET'),
+                    string(credentialsId: 'OKDEV_STRIPE_SECRET_KEY',            variable: 'STRIPE_SECRET_KEY'),
+                    string(credentialsId: 'OKDEV_STRIPE_WEBHOOK_SECRET',        variable: 'STRIPE_WEBHOOK_SECRET'),
+                    string(credentialsId: 'OKDEV_DISCORD_CLIENT_ID',            variable: 'DISCORD_CLIENT_ID'),
+                    string(credentialsId: 'OKDEV_DISCORD_CLIENT_SECRET',        variable: 'DISCORD_CLIENT_SECRET'),
+                    string(credentialsId: 'OKDEV_GITHUB_CLIENT_ID',             variable: 'GITHUB_CLIENT_ID'),
+                    string(credentialsId: 'OKDEV_GITHUB_CLIENT_SECRET',         variable: 'GITHUB_CLIENT_SECRET'),
+                    string(credentialsId: 'OKDEV_GITHUB_BOT_TOKEN',             variable: 'GITHUB_BOT_TOKEN'),
+                    string(credentialsId: 'OKDEV_GOOGLE_CLIENT_ID',             variable: 'GOOGLE_CLIENT_ID'),
+                    string(credentialsId: 'OKDEV_GOOGLE_CLIENT_SECRET',         variable: 'GOOGLE_CLIENT_SECRET'),
+                    string(credentialsId: 'OKDEV_GOOGLE_TEMPLATE_SPREADSHEET_ID', variable: 'GOOGLE_TEMPLATE_SPREADSHEET_ID'),
                     // Encryption key for stored refresh tokens
-                    string(credentialsId: 'OVERKILL_APP_SECRET',                   variable: 'APP_SECRET'),
+                    string(credentialsId: 'OKDEV_APP_SECRET',                   variable: 'APP_SECRET'),
                 ]) {
                     // Write frontend/.env.production (not a secret, just the relative API path)
                     sh 'echo "VITE_API_BASE_URL=/api" > frontend/.env.production'
