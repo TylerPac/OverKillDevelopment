@@ -25,6 +25,7 @@ spring.flyway.enabled=false
 app.shop.currency=usd
 app.shop.success-url=http://localhost:5173
 app.shop.cancel-url=http://localhost:5173
+app.shop.admin-token=${SHOP_ADMIN_TOKEN}
 app.shop.download-root=downloads
 app.stripe.secret-key=${STRIPE_SECRET_KEY}
 app.stripe.webhook-secret=${STRIPE_WEBHOOK_SECRET}

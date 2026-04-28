@@ -1,11 +1,16 @@
 package dev.tylerpac.backend.service;
 
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,12 +36,16 @@ import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
+import dev.tylerpac.backend.dto.CreateFullAccessCodeResponse;
+import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
 import dev.tylerpac.backend.model.ProcessedStripeEvent;
+import dev.tylerpac.backend.model.ShopAccessCode;
 import dev.tylerpac.backend.model.ShopOrder;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.repo.ProcessedStripeEventRepository;
+import dev.tylerpac.backend.repo.ShopAccessCodeRepository;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserRepository;
 
@@ -48,7 +57,10 @@ public class StripeShopService {
     private static final String STATUS_PAID = "PAID";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_EXPIRED = "EXPIRED";
+    private static final String ACCESS_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final SecureRandom ACCESS_CODE_RANDOM = new SecureRandom();
 
+    private final ShopAccessCodeRepository shopAccessCodeRepository;
     private final ShopOrderRepository shopOrderRepository;
     private final ProcessedStripeEventRepository processedStripeEventRepository;
     private final PurchaseEmailService purchaseEmailService;
@@ -59,8 +71,10 @@ public class StripeShopService {
     private final String cancelUrl;
     private final String webhookSecret;
     private final String premiumPriceId;
+    private final String shopAdminToken;
 
     public StripeShopService(
+        ShopAccessCodeRepository shopAccessCodeRepository,
         ShopOrderRepository shopOrderRepository,
         ProcessedStripeEventRepository processedStripeEventRepository,
         PurchaseEmailService purchaseEmailService,
@@ -69,10 +83,12 @@ public class StripeShopService {
         @Value("${app.shop.currency:usd}") String currency,
         @Value("${app.shop.success-url}") String successUrl,
         @Value("${app.shop.cancel-url}") String cancelUrl,
+        @Value("${app.shop.admin-token:}") String shopAdminToken,
         @Value("${app.stripe.secret-key:}") String stripeSecretKey,
         @Value("${app.stripe.webhook-secret:}") String webhookSecret,
         @Value("${app.stripe.premium-price-id:}") String premiumPriceId
     ) {
+        this.shopAccessCodeRepository = shopAccessCodeRepository;
         this.shopOrderRepository = shopOrderRepository;
         this.processedStripeEventRepository = processedStripeEventRepository;
         this.purchaseEmailService = purchaseEmailService;
@@ -81,6 +97,7 @@ public class StripeShopService {
         this.currency = currency;
         this.successUrl = normalizeCheckoutBaseUrl(successUrl);
         this.cancelUrl = normalizeCheckoutBaseUrl(cancelUrl);
+        this.shopAdminToken = shopAdminToken;
         this.webhookSecret = webhookSecret;
         this.premiumPriceId = premiumPriceId;
 
@@ -105,6 +122,104 @@ public class StripeShopService {
 
     public List<ShopProductResponse> getProducts() {
         return List.copyOf(catalog().values());
+    }
+
+    @Transactional
+    public CreateFullAccessCodeResponse createAccessCode(String requestedCode, List<String> requestedProductIds, String adminToken) {
+        requireAdminToken(adminToken);
+
+        String normalizedCode = normalizeAccessCode(requestedCode, true);
+        if (!StringUtils.hasText(normalizedCode)) {
+            normalizedCode = generateUniqueAccessCode();
+        }
+
+        if (shopAccessCodeRepository.existsByCode(normalizedCode)) {
+            throw new IllegalArgumentException("code_already_exists");
+        }
+
+        List<ShopProductResponse> scopedProducts = resolveScopedProducts(requestedProductIds);
+        boolean fullAccess = scopedProducts.isEmpty();
+
+        ShopAccessCode accessCode = new ShopAccessCode();
+        accessCode.setCode(normalizedCode);
+        accessCode.setFullAccess(fullAccess);
+        accessCode.setProductIdsCsv(fullAccess
+            ? null
+            : scopedProducts.stream().map(ShopProductResponse::getId).collect(Collectors.joining(",")));
+
+        try {
+            shopAccessCodeRepository.save(accessCode);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalArgumentException("code_already_exists");
+        }
+
+        List<String> scopedProductIds = fullAccess
+            ? List.of()
+            : scopedProducts.stream().map(ShopProductResponse::getId).toList();
+
+        return new CreateFullAccessCodeResponse(
+            normalizedCode,
+            true,
+            fullAccess,
+            scopedProductIds,
+            fullAccess ? getProducts().size() : scopedProductIds.size()
+        );
+    }
+
+    @Transactional
+    public CreateFullAccessCodeResponse createFullAccessCode(String requestedCode, String adminToken) {
+        return createAccessCode(requestedCode, Collections.emptyList(), adminToken);
+    }
+
+    @Transactional
+    public RedeemFullAccessCodeResponse redeemFullAccessCode(User user, String rawCode) {
+        String code = normalizeAccessCode(rawCode, false);
+        ShopAccessCode accessCode = shopAccessCodeRepository.findByCode(code)
+            .orElseThrow(() -> new IllegalArgumentException("invalid_access_code"));
+
+        if (accessCode.getRedeemedAt() != null) {
+            throw new IllegalArgumentException("access_code_already_redeemed");
+        }
+
+        List<ShopProductResponse> scopedProducts = accessCode.isFullAccess()
+            ? getProducts()
+            : resolveScopedProductsFromCode(accessCode);
+
+        List<ShopProductResponse> productsToGrant = new ArrayList<>();
+        for (ShopProductResponse product : scopedProducts) {
+            boolean alreadyOwned = shopOrderRepository.existsByUserAndProductIdAndStatusIgnoreCase(user, product.getId(), STATUS_PAID);
+            if (!alreadyOwned) {
+                productsToGrant.add(product);
+            }
+        }
+
+        if (productsToGrant.isEmpty()) {
+            throw new IllegalArgumentException("nothing_to_redeem");
+        }
+
+        List<String> grantedProductIds = new ArrayList<>();
+        for (ShopProductResponse product : productsToGrant) {
+            ShopOrder order = new ShopOrder();
+            order.setUser(user);
+            order.setProductId(product.getId());
+            order.setProductName(product.getName());
+            order.setAmountCents(0L);
+            order.setCurrency(product.getCurrency());
+            order.setStatus(STATUS_PAID);
+            order.setStripeCheckoutSessionId("promo:" + accessCode.getId() + ":" + product.getId());
+            order.setStripePaymentIntentId("promo:" + accessCode.getId());
+            shopOrderRepository.save(order);
+
+            purchaseEmailService.sendOrderPaid(user, order);
+            gitHubRepoService.grantRepoAccess(user.getGithubUsername(), product.getId());
+            grantedProductIds.add(product.getId());
+        }
+
+        accessCode.setRedeemedByUser(user);
+        accessCode.setRedeemedAt(Instant.now());
+        shopAccessCodeRepository.save(accessCode);
+
+        return new RedeemFullAccessCodeResponse(grantedProductIds.size(), grantedProductIds);
     }
 
     @Transactional
@@ -606,6 +721,103 @@ public class StripeShopService {
             return null;
         }
         return "subscription:" + user.getId() + ":" + idempotencyKey.trim();
+    }
+
+    private List<ShopProductResponse> resolveScopedProducts(List<String> requestedProductIds) {
+        if (requestedProductIds == null || requestedProductIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> normalizedIds = requestedProductIds.stream()
+            .filter(StringUtils::hasText)
+            .map(String::trim)
+            .distinct()
+            .toList();
+
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<ShopProductResponse> scopedProducts = new ArrayList<>();
+        for (String productId : normalizedIds) {
+            ShopProductResponse product = catalog().get(productId);
+            if (product == null) {
+                throw new IllegalArgumentException("invalid_product: " + productId);
+            }
+            scopedProducts.add(product);
+        }
+        return scopedProducts;
+    }
+
+    private List<ShopProductResponse> resolveScopedProductsFromCode(ShopAccessCode accessCode) {
+        if (accessCode.isFullAccess()) {
+            return getProducts();
+        }
+        if (!StringUtils.hasText(accessCode.getProductIdsCsv())) {
+            return List.of();
+        }
+
+        String[] productIds = accessCode.getProductIdsCsv().split(",");
+        List<ShopProductResponse> scopedProducts = new ArrayList<>();
+        for (String rawId : productIds) {
+            if (!StringUtils.hasText(rawId)) {
+                continue;
+            }
+            String productId = rawId.trim();
+            ShopProductResponse product = catalog().get(productId);
+            if (product != null) {
+                scopedProducts.add(product);
+            }
+        }
+        return scopedProducts;
+    }
+
+    private void requireAdminToken(String adminToken) {
+        if (!StringUtils.hasText(shopAdminToken)) {
+            throw new IllegalStateException("admin_token_not_configured");
+        }
+        if (!StringUtils.hasText(adminToken) || !shopAdminToken.equals(adminToken.trim())) {
+            throw new IllegalArgumentException("invalid_admin_token");
+        }
+    }
+
+    private String normalizeAccessCode(String rawCode, boolean allowBlank) {
+        if (!StringUtils.hasText(rawCode)) {
+            if (allowBlank) {
+                return null;
+            }
+            throw new IllegalArgumentException("access_code_required");
+        }
+
+        String normalized = rawCode.trim().toUpperCase(Locale.ROOT);
+        if (!normalized.matches("[A-Z0-9-]{6,64}")) {
+            throw new IllegalArgumentException("invalid_access_code_format");
+        }
+        return normalized;
+    }
+
+    private String generateUniqueAccessCode() {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String code = "OKD-" + randomAccessCodeBlock(4) + "-" + randomAccessCodeBlock(4) + "-" + randomAccessCodeBlock(4);
+            if (!shopAccessCodeRepository.existsByCode(code)) {
+                return code;
+            }
+        }
+
+        String fallback = "OKD-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase(Locale.ROOT);
+        if (shopAccessCodeRepository.existsByCode(fallback)) {
+            throw new IllegalStateException("access_code_generation_failed");
+        }
+        return fallback;
+    }
+
+    private String randomAccessCodeBlock(int length) {
+        StringBuilder builder = new StringBuilder(length);
+        for (int index = 0; index < length; index++) {
+            int next = ACCESS_CODE_RANDOM.nextInt(ACCESS_CODE_ALPHABET.length());
+            builder.append(ACCESS_CODE_ALPHABET.charAt(next));
+        }
+        return builder.toString();
     }
 
     @Transactional

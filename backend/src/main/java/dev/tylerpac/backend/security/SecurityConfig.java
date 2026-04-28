@@ -53,7 +53,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**", "/api/google/**", "/actuator/**", "/shop/webhook", "/shop/products").permitAll()
+                .requestMatchers("/auth/**", "/api/google/**", "/actuator/**", "/shop/webhook", "/shop/products", "/shop/access-codes/full-unlock", "/shop/access-codes/create").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

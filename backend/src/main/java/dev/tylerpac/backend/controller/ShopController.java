@@ -25,6 +25,10 @@ import com.stripe.exception.StripeException;
 import dev.tylerpac.backend.dto.CreateCartCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
+import dev.tylerpac.backend.dto.CreateFullAccessCodeRequest;
+import dev.tylerpac.backend.dto.CreateFullAccessCodeResponse;
+import dev.tylerpac.backend.dto.RedeemFullAccessCodeRequest;
+import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
 import dev.tylerpac.backend.dto.SubscriptionStatusResponse;
@@ -55,6 +59,65 @@ public class ShopController {
     @GetMapping("/products")
     public ResponseEntity<List<ShopProductResponse>> products() {
         return ResponseEntity.ok(stripeShopService.getProducts());
+    }
+
+    @PostMapping("/access-codes/full-unlock")
+    public ResponseEntity<?> createFullAccessCode(
+        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
+        @RequestHeader(value = "X-Shop-Admin-Token", required = false) String adminToken
+    ) {
+        try {
+            String requestedCode = request != null ? request.getCode() : null;
+            CreateFullAccessCodeResponse response = stripeShopService.createFullAccessCode(requestedCode, adminToken);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "invalid_admin_token" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/access-codes/create")
+    public ResponseEntity<?> createAccessCode(
+        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
+        @RequestHeader(value = "X-Shop-Admin-Token", required = false) String adminToken
+    ) {
+        try {
+            String requestedCode = request != null ? request.getCode() : null;
+            List<String> productIds = request != null ? request.getProductIds() : null;
+            CreateFullAccessCodeResponse response = stripeShopService.createAccessCode(requestedCode, productIds, adminToken);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "invalid_admin_token" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
+        }
+    }
+
+    @PostMapping("/access-codes/redeem")
+    public ResponseEntity<?> redeemFullAccessCode(
+        @Valid @RequestBody RedeemFullAccessCodeRequest request,
+        Principal principal
+    ) {
+        try {
+            User user = requireUser(principal);
+            if (!StringUtils.hasText(user.getSteam64Id())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("account_not_setup");
+            }
+            RedeemFullAccessCodeResponse response = stripeShopService.redeemFullAccessCode(user, request.getCode());
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "account_not_setup" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
     }
 
     @PostMapping("/checkout-session")

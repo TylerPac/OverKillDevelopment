@@ -1,19 +1,90 @@
+import { useState } from 'react';
+
 export default function CartView({
   cart,
   products,
   onRemoveFromCart,
   onCheckoutCart,
+  onRedeemFullAccessCode,
   onBack,
   shopLoading,
   accountSetupComplete,
 }) {
+  const [accessCode, setAccessCode] = useState('');
   const cartProducts = products.filter((p) => cart.includes(p.id));
   const totalCents = cartProducts.reduce((sum, p) => sum + p.amountCents, 0);
   const currency = cartProducts[0]?.currency ?? 'usd';
 
+  async function handleRedeemSubmit(event) {
+    event.preventDefault();
+    if (!accessCode.trim()) {
+      return;
+    }
+
+    const redeemed = await onRedeemFullAccessCode(accessCode);
+    if (redeemed) {
+      setAccessCode('');
+    }
+  }
+
   return (
     <section style={{ marginTop: '1rem' }}>
       <h2>Cart</h2>
+
+      <div
+        style={{
+          marginTop: '1rem',
+          marginBottom: '1rem',
+          maxWidth: 620,
+          padding: '0.85rem 1rem',
+          background: '#171725',
+          border: '1px solid #2f3550',
+          borderRadius: 8,
+        }}
+      >
+        <p style={{ margin: 0, color: '#eee', fontWeight: 600 }}>
+          Have a one-time access code?
+        </p>
+        <p style={{ margin: '0.35rem 0 0', color: '#9fb1d1', fontSize: '0.85rem' }}>
+          Redeem it once to unlock your code-assigned products without going through Stripe.
+        </p>
+
+        <form
+          onSubmit={handleRedeemSubmit}
+          style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginTop: '0.9rem' }}
+        >
+          <input
+            type="text"
+            value={accessCode}
+            onChange={(event) => setAccessCode(event.target.value.toUpperCase())}
+            placeholder="OKD-ABCD-EFGH-IJKL"
+            disabled={shopLoading}
+            style={{
+              flex: '1 1 280px',
+              minWidth: 220,
+              padding: '0.6rem 0.75rem',
+              borderRadius: 6,
+              border: '1px solid #44516d',
+              background: '#0f1320',
+              color: '#eee',
+              fontFamily: 'inherit',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={shopLoading || !accountSetupComplete || !accessCode.trim()}
+            style={{ padding: '0.6rem 1rem', fontSize: '0.9rem' }}
+          >
+            Redeem Code
+          </button>
+        </form>
+
+        {!accountSetupComplete && (
+          <p style={{ color: '#f4a261', fontSize: '0.8rem', margin: '0.65rem 0 0' }}>
+            Link your Steam account before redeeming a code.
+          </p>
+        )}
+      </div>
 
       {cartProducts.length === 0 ? (
         <div style={{ marginTop: '1rem' }}>
