@@ -15,6 +15,8 @@ pipeline {
                     string(credentialsId: 'OKDEV_MYSQL_DATABASE',      variable: 'MYSQL_DATABASE'),
                     string(credentialsId: 'OKDEV_MYSQL_USER',          variable: 'MYSQL_USER'),
                     string(credentialsId: 'OKDEV_MYSQL_PASSWORD',      variable: 'MYSQL_PASSWORD'),
+                    string(credentialsId: 'OKDEV_MYSQL_HOST',          variable: 'MYSQL_HOST'),
+                    string(credentialsId: 'OKDEV_MYSQL_PORT',          variable: 'MYSQL_PORT'),
                     // Backend env
                     string(credentialsId: 'OKDEV_JWT_SECRET',                   variable: 'JWT_SECRET'),
                     string(credentialsId: 'OKDEV_STRIPE_SECRET_KEY',            variable: 'STRIPE_SECRET_KEY'),
@@ -36,7 +38,7 @@ pipeline {
                     // Write backend/.env.production from Jenkins secrets
                     sh '''
 cat > backend/.env.production <<EOF
-DB_URL=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
+DB_URL=jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}
 DB_USERNAME=${MYSQL_USER}
 DB_PASSWORD=${MYSQL_PASSWORD}
 SPRING_PROFILES_ACTIVE=prod
@@ -66,9 +68,11 @@ APP_SHOP_GITHUB_REPO_WEAPON_SYSTEM=OverKill-Dayz/DankOpticsPack,OverKill-Dayz/Da
 APP_SHOP_GITHUB_REPO_BATTLE_PASS=OverKill-Dayz/BattlePass,OverKill-Dayz/UniversalApi
 EOF
 '''
-                    sh 'docker compose -f docker-compose.yml down --remove-orphans || true'
+                    # Stop any previous backend/frontend containers (do not touch external mysql)
+                    sh 'docker compose -f docker-compose.yml stop backend frontend || true'
                     sh 'docker compose -f docker-compose.yml build --no-cache --pull'
-                    sh 'docker compose -f docker-compose.yml up -d'
+                    # Start backend/frontend only without bringing up dependencies (no MySQL container)
+                    sh 'docker compose -f docker-compose.yml up -d --no-deps backend frontend'
                 }
             }
         }
