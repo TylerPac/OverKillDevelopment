@@ -68,10 +68,10 @@ APP_SHOP_GITHUB_REPO_WEAPON_SYSTEM=OverKill-Dayz/DankOpticsPack,OverKill-Dayz/Da
 APP_SHOP_GITHUB_REPO_BATTLE_PASS=OverKill-Dayz/BattlePass,OverKill-Dayz/UniversalApi
 EOF
 '''
-                    # Stop any previous backend/frontend containers (do not touch external mysql)
+                    // Stop any previous backend/frontend containers (do not touch external mysql)
                     sh 'docker compose -f docker-compose.yml stop backend frontend || true'
                     sh 'docker compose -f docker-compose.yml build --no-cache --pull'
-                    # Start backend/frontend only without bringing up dependencies (no MySQL container)
+                    // Start backend/frontend only without bringing up dependencies (no MySQL container)
                     sh 'docker compose -f docker-compose.yml up -d --no-deps backend frontend'
                 }
             }
