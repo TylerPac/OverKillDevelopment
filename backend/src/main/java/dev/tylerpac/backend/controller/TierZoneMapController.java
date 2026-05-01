@@ -142,7 +142,7 @@ public class TierZoneMapController {
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(ex.getMessage());
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ex.getMessage());
+            return ResponseEntity.status(422).body(ex.getMessage());
         }
     }
 

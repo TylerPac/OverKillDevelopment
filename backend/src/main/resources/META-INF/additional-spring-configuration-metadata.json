@@ -1,0 +1,151 @@
+{
+  "properties": [
+    {
+      "name": "spring.flyway.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether to enable Flyway database migrations.",
+      "defaultValue": true
+    },
+    {
+      "name": "app.security.allow-weak-jwt-secret",
+      "type": "java.lang.Boolean",
+      "description": "Allow a JWT secret shorter than 32 characters (dev/test only).",
+      "defaultValue": false
+    },
+    {
+      "name": "app.allowed-origins",
+      "type": "java.lang.String",
+      "description": "Comma-separated list of allowed CORS origins."
+    },
+    {
+      "name": "app.auth.frontend-base-url",
+      "type": "java.lang.String",
+      "description": "Base URL of the frontend, used for OAuth redirect callbacks.",
+      "defaultValue": "http://localhost:5173"
+    },
+    {
+      "name": "app.auth.access-token-ttl-minutes",
+      "type": "java.lang.Long",
+      "description": "Lifetime of a JWT access token in minutes.",
+      "defaultValue": 15
+    },
+    {
+      "name": "app.auth.refresh-token-ttl-days",
+      "type": "java.lang.Long",
+      "description": "Lifetime of a refresh token in days.",
+      "defaultValue": 7
+    },
+    {
+      "name": "app.auth.rate-limit.max-requests-per-minute",
+      "type": "java.lang.Integer",
+      "description": "Maximum authentication requests allowed per minute per IP.",
+      "defaultValue": 60
+    },
+    {
+      "name": "app.auth.bruteforce.max-failures",
+      "type": "java.lang.Integer",
+      "description": "Number of consecutive login failures before an account is locked.",
+      "defaultValue": 5
+    },
+    {
+      "name": "app.auth.bruteforce.lock-minutes",
+      "type": "java.lang.Integer",
+      "description": "Duration of a brute-force lock in minutes.",
+      "defaultValue": 15
+    },
+    {
+      "name": "app.auth.steam.realm",
+      "type": "java.lang.String",
+      "description": "Steam OpenID realm (the base URL of this server).",
+      "defaultValue": "http://localhost:8081"
+    },
+    {
+      "name": "app.auth.steam.return-url",
+      "type": "java.lang.String",
+      "description": "Steam OpenID return URL (callback endpoint).",
+      "defaultValue": "http://localhost:8081/auth/steam/callback"
+    },
+    {
+      "name": "app.auth.discord.client-id",
+      "type": "java.lang.String",
+      "description": "Discord OAuth2 application client ID."
+    },
+    {
+      "name": "app.auth.discord.client-secret",
+      "type": "java.lang.String",
+      "description": "Discord OAuth2 application client secret."
+    },
+    {
+      "name": "app.auth.discord.redirect-uri",
+      "type": "java.lang.String",
+      "description": "Discord OAuth2 redirect URI.",
+      "defaultValue": "http://localhost:8081/auth/discord/callback"
+    },
+    {
+      "name": "app.auth.github.client-id",
+      "type": "java.lang.String",
+      "description": "GitHub OAuth2 application client ID."
+    },
+    {
+      "name": "app.auth.github.client-secret",
+      "type": "java.lang.String",
+      "description": "GitHub OAuth2 application client secret."
+    },
+    {
+      "name": "app.auth.github.redirect-uri",
+      "type": "java.lang.String",
+      "description": "GitHub OAuth2 redirect URI.",
+      "defaultValue": "http://localhost:8081/auth/github/callback"
+    },
+    {
+      "name": "app.github.bot-token",
+      "type": "java.lang.String",
+      "description": "GitHub Personal Access Token used to grant collaborator access on purchase."
+    },
+    {
+      "name": "app.shop.currency",
+      "type": "java.lang.String",
+      "description": "ISO 4217 currency code used for Stripe checkout.",
+      "defaultValue": "usd"
+    },
+    {
+      "name": "app.shop.success-url",
+      "type": "java.lang.String",
+      "description": "URL to redirect to after a successful Stripe checkout.",
+      "defaultValue": "http://localhost:5173"
+    },
+    {
+      "name": "app.shop.cancel-url",
+      "type": "java.lang.String",
+      "description": "URL to redirect to when a Stripe checkout is cancelled.",
+      "defaultValue": "http://localhost:5173"
+    },
+    {
+      "name": "app.shop.reconcile-interval-ms",
+      "type": "java.lang.Long",
+      "description": "Interval in milliseconds between Stripe order reconciliation runs.",
+      "defaultValue": 300000
+    },
+    {
+      "name": "app.shop.download-root",
+      "type": "java.lang.String",
+      "description": "Filesystem path (relative to working directory) where purchasable downloads are stored.",
+      "defaultValue": "downloads"
+    },
+    {
+      "name": "app.stripe.secret-key",
+      "type": "java.lang.String",
+      "description": "Stripe secret API key."
+    },
+    {
+      "name": "app.stripe.webhook-secret",
+      "type": "java.lang.String",
+      "description": "Stripe webhook endpoint signing secret."
+    },
+    {
+      "name": "app.stripe.premium-price-id",
+      "type": "java.lang.String",
+      "description": "Stripe Price ID for the premium product."
+    }
+  ]
+}

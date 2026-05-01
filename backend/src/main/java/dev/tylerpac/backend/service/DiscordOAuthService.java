@@ -14,6 +14,7 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import dev.tylerpac.backend.util.JsonUtils;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -73,8 +74,10 @@ public class DiscordOAuthService {
             }
 
             JsonNode json = objectMapper.readTree(response.body());
-            String id = json.path("id").asText("");
-            String username = json.path("username").asText("");
+            String id = JsonUtils.textOrNull(json.path("id"));
+            if (id == null) id = "";
+            String username = JsonUtils.textOrNull(json.path("username"));
+            if (username == null) username = "";
             if (id.isBlank() || username.isBlank()) {
                 throw new IllegalArgumentException("discord_profile_invalid");
             }
@@ -107,7 +110,8 @@ public class DiscordOAuthService {
             }
 
             JsonNode json = objectMapper.readTree(response.body());
-            String token = json.path("access_token").asText("");
+            String token = JsonUtils.textOrNull(json.path("access_token"));
+            if (token == null) token = "";
             if (token.isBlank()) {
                 throw new IllegalArgumentException("discord_access_token_missing");
             }

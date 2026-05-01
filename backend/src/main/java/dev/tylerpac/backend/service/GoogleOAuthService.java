@@ -18,6 +18,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import dev.tylerpac.backend.util.JsonUtils;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -88,8 +90,10 @@ public class GoogleOAuthService {
                 throw new IllegalArgumentException("google_token_exchange_failed");
             }
             JsonNode json = objectMapper.readTree(resp.body());
-            String accessToken = json.path("access_token").asText("");
-            String refreshToken = json.path("refresh_token").asText("");
+            String accessToken = JsonUtils.textOrNull(json.path("access_token"));
+            if (accessToken == null) accessToken = "";
+            String refreshToken = JsonUtils.textOrNull(json.path("refresh_token"));
+            if (refreshToken == null) refreshToken = "";
             long expiresIn = json.path("expires_in").asLong(0L);
             return new Tokens(accessToken, refreshToken, expiresIn);
         } catch (IOException | InterruptedException e) {
@@ -118,7 +122,8 @@ public class GoogleOAuthService {
                 throw new IllegalArgumentException("google_refresh_failed");
             }
             JsonNode json = objectMapper.readTree(resp.body());
-            return json.path("access_token").asText("");
+            String at = JsonUtils.textOrNull(json.path("access_token"));
+            return at == null ? "" : at;
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("google_refresh_failed", e);
@@ -213,7 +218,7 @@ public class GoogleOAuthService {
             }
             try {
                 return objectMapper.readTree(respBody);
-            } catch (Exception e) {
+            } catch (JacksonException e) {
                 throw new IllegalStateException("drive_copy_failed: invalid_json: " + respBody, e);
             }
         } catch (IOException | InterruptedException e) {
@@ -254,8 +259,8 @@ public class GoogleOAuthService {
                 throw new IllegalArgumentException("sheets_create_failed: status=" + createResp.statusCode() + " body=" + createResp.body());
             }
             JsonNode created = objectMapper.readTree(createResp.body());
-            String destId = created.path("spreadsheetId").asText("");
-            if (destId.isEmpty()) throw new IllegalStateException("sheets_create_failed: missing_id");
+            String destId = JsonUtils.textOrNull(created.path("spreadsheetId"));
+            if (destId == null || destId.isEmpty()) throw new IllegalStateException("sheets_create_failed: missing_id");
 
             // Get the auto-created default sheet's sheetId so we can delete it later
             long defaultSheetId = -1;
@@ -270,7 +275,8 @@ public class GoogleOAuthService {
 
             for (JsonNode sheet : sourceSheets) {
                 long srcSheetId = sheet.path("properties").path("sheetId").asLong(-1);
-                String title = sheet.path("properties").path("title").asText("");
+                String title = JsonUtils.textOrNull(sheet.path("properties").path("title"));
+                if (title == null) title = "";
                 if (srcSheetId < 0 || title.isEmpty()) continue;
 
                 String copyToUrl = "https://sheets.googleapis.com/v4/spreadsheets/"
@@ -358,7 +364,7 @@ public class GoogleOAuthService {
         JsonNode sheets = meta.path("sheets");
         if (sheets.isArray()) {
             for (JsonNode s : sheets) {
-                String title = s.path("properties").path("title").asText(null);
+                String title = JsonUtils.textOrNull(s.path("properties").path("title"));
                 if (title != null && !title.isEmpty()) sheetTitles.add(title);
             }
         }
@@ -374,8 +380,10 @@ public class GoogleOAuthService {
             sheetsArray.add(s);
         } else {
             for (JsonNode t : sheetTitles) {
+                String tTitle = JsonUtils.textOrNull(t);
+                if (tTitle == null) tTitle = "";
                 ObjectNode s = objectMapper.createObjectNode();
-                s.putObject("properties").put("title", t.asText());
+                s.putObject("properties").put("title", tTitle);
                 sheetsArray.add(s);
             }
         }
@@ -397,15 +405,16 @@ public class GoogleOAuthService {
                 throw new IllegalArgumentException("sheets_create_failed: status=" + status + " body=" + body);
             }
             JsonNode created = objectMapper.readTree(body);
-            String newId = created.path("spreadsheetId").asText("");
-            if (newId.isEmpty()) throw new IllegalStateException("sheets_create_failed: missing_id");
+            String newId = JsonUtils.textOrNull(created.path("spreadsheetId"));
+            if (newId == null || newId.isEmpty()) throw new IllegalStateException("sheets_create_failed: missing_id");
 
             // Prepare batchUpdate data by copying values from each template sheet
             ArrayNode dataArray = objectMapper.createArrayNode();
             if (sheetTitles.size() > 0) {
                 String apiKey = System.getenv("GOOGLE_API_KEY");
                 for (JsonNode t : sheetTitles) {
-                    String title = t.asText();
+                    String title = JsonUtils.textOrNull(t);
+                    if (title == null) title = "";
                     JsonNode valuesResp = null;
                     // Try OAuth fetch first (works when the token has file access)
                     try {

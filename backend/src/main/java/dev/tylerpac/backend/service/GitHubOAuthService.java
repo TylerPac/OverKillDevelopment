@@ -14,6 +14,7 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import dev.tylerpac.backend.util.JsonUtils;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -73,8 +74,10 @@ public class GitHubOAuthService {
             }
 
             JsonNode json = objectMapper.readTree(response.body());
-            String id = json.path("id").asText("");
-            String login = json.path("login").asText("");
+            String id = JsonUtils.textOrNull(json.path("id"));
+            if (id == null) id = "";
+            String login = JsonUtils.textOrNull(json.path("login"));
+            if (login == null) login = "";
             if (id.isBlank() || login.isBlank()) {
                 throw new IllegalArgumentException("github_profile_invalid");
             }
@@ -107,7 +110,8 @@ public class GitHubOAuthService {
             }
 
             JsonNode json = objectMapper.readTree(response.body());
-            String accessToken = json.path("access_token").asText("");
+            String accessToken = JsonUtils.textOrNull(json.path("access_token"));
+            if (accessToken == null) accessToken = "";
             if (accessToken.isBlank()) {
                 throw new IllegalArgumentException("github_token_missing");
             }

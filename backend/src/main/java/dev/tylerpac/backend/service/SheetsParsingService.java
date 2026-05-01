@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
+import dev.tylerpac.backend.util.JsonUtils;
 import tools.jackson.databind.JsonNode;
 
 @Service
@@ -59,7 +60,7 @@ public class SheetsParsingService {
         int i = 0;
         while (i < rows.size()) {
             List<String> row = rows.get(i);
-            String first = row.size() > 0 ? safeTrim(row.get(0)) : "";
+            String first = !row.isEmpty() ? safeTrim(row.get(0)) : "";
             if (first.equalsIgnoreCase("AttachmentProfiles") || first.equalsIgnoreCase("Attachment Profiles")) {
                 i++;
                 i = parseSectionGroupedByProfile(rows, i, attachmentProfiles);
@@ -80,9 +81,7 @@ public class SheetsParsingService {
 
         Map<String, Object> master = new LinkedHashMap<>();
         // If the simple section-based parsing produced no results, try the block-layout fallback
-        if ((attachmentProfiles == null || attachmentProfiles.isEmpty())
-            && (lootTables == null || lootTables.isEmpty())
-            && (itemProfiles == null || itemProfiles.isEmpty())) {
+        if (attachmentProfiles.isEmpty() && lootTables.isEmpty() && itemProfiles.isEmpty()) {
             rows = extractRows(sheetsValuesResponse);
             List<Map<String, Object>> lt = parseLootTablesBlocks(rows);
             List<Map<String, Object>> ip = parseItemProfilesBlocks(rows);
@@ -145,8 +144,7 @@ public class SheetsParsingService {
         String t = s.trim();
         if (t.isEmpty()) return null;
         try {
-            double d = Double.parseDouble(t);
-            return (int) d;
+            return (int) Double.parseDouble(t);
         } catch (NumberFormatException ex) {
             return null;
         }
@@ -154,10 +152,8 @@ public class SheetsParsingService {
 
     private Double toDoubleOrNull(String s) {
         if (s == null) return null;
-        String t = s.trim();
-        if (t.isEmpty()) return null;
         try {
-            return Double.parseDouble(t);
+            return Double.valueOf(s.trim());
         } catch (NumberFormatException ex) {
             return null;
         }
@@ -296,11 +292,11 @@ public class SheetsParsingService {
             int qmaxCol = startCol + 3;
             int hminCol = startCol + 4;
             int hmaxCol = startCol + 5;
-            Integer slotProfileCol = startCol + 6;
-            Integer slotProbCol = startCol + 7;
+            int slotProfileCol = startCol + 6;
+            int slotProbCol = startCol + 7;
 
             String slotHeader = normHeader(getCell(rect, itemHdrRow, slotProfileCol));
-            if (!slotHeader.equals("profile")) { slotProfileCol = null; slotProbCol = null; }
+            if (!slotHeader.equals("profile")) { slotProfileCol = -1; slotProbCol = -1; }
 
             int dataStart = itemHdrRow + 1;
             List<Map<String, Object>> items = new ArrayList<>();
@@ -309,7 +305,7 @@ public class SheetsParsingService {
 
             for (int r = dataStart; r < rect.size(); r++) {
                 String itemName = getCell(rect, r, itemCol);
-                if (isBlankCell(itemName) && currentItem != null && slotProfileCol != null) {
+                if (isBlankCell(itemName) && currentItem != null && slotProfileCol != -1) {
                     String sp = getCell(rect, r, slotProfileCol);
                     if (!isBlankCell(sp)) {
                         Double prob = toDoubleOrNull(getCell(rect, r, slotProbCol));
@@ -345,7 +341,7 @@ public class SheetsParsingService {
                 currentItem.put("ItemHealthMax", hmax);
                 currentItem.put("Slots", new ArrayList<Map<String,Object>>());
 
-                if (slotProfileCol != null) {
+                if (slotProfileCol != -1) {
                     String sp = getCell(rect, r, slotProfileCol);
                     if (!isBlankCell(sp)) {
                         Double prob = toDoubleOrNull(getCell(rect, r, slotProbCol));
@@ -505,7 +501,9 @@ public class SheetsParsingService {
         if (values == null || !values.isArray()) return rows;
         for (JsonNode r : values) {
             List<String> row = new ArrayList<>();
-            for (JsonNode c : r) row.add(c.isNull() ? "" : c.asText());
+            for (JsonNode c : r) {
+                row.add(JsonUtils.textOrEmpty(c));
+            }
             rows.add(row);
         }
         return rows;
@@ -518,7 +516,7 @@ public class SheetsParsingService {
         while (i < rows.size()) {
             List<String> row = rows.get(i);
             if (row == null || row.stream().allMatch(c -> c == null || c.trim().isEmpty())) break;
-            String first = row.size() > 0 ? safeTrim(row.get(0)) : "";
+            String first = !row.isEmpty() ? safeTrim(row.get(0)) : "";
             if (isSectionHeading(first)) break;
             Map<String, Object> obj = new LinkedHashMap<>();
             for (int c = 0; c < header.size(); c++) {
@@ -540,7 +538,7 @@ public class SheetsParsingService {
         while (i < rows.size()) {
             List<String> row = rows.get(i);
             if (row == null || row.stream().allMatch(c -> c == null || c.trim().isEmpty())) break;
-            String first = row.size() > 0 ? safeTrim(row.get(0)) : "";
+            String first = !row.isEmpty() ? safeTrim(row.get(0)) : "";
             if (isSectionHeading(first)) break;
 
             Map<String, String> flat = new LinkedHashMap<>();
@@ -595,7 +593,7 @@ public class SheetsParsingService {
     private Object toTypedValue(String raw) {
         String s = safeTrim(raw);
         if (s.isEmpty()) return null;
-        if (s.equalsIgnoreCase("true") || s.equalsIgnoreCase("false")) return Boolean.parseBoolean(s);
+            if (s.equalsIgnoreCase("true") || s.equalsIgnoreCase("false")) return Boolean.valueOf(s);
         try {
             if (s.matches("-?\\d+")) {
                 long l = Long.parseLong(s);
@@ -603,7 +601,7 @@ public class SheetsParsingService {
                 return l;
             }
             if (s.matches("-?\\d*\\.\\d+")) {
-                return Double.parseDouble(s);
+                return Double.valueOf(s);
             }
         } catch (NumberFormatException ex) {
             // fall through

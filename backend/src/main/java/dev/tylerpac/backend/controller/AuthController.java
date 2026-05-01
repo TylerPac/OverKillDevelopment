@@ -35,6 +35,7 @@ import dev.tylerpac.backend.service.GoogleOAuthService;
 import dev.tylerpac.backend.service.SheetsParsingService;
 import dev.tylerpac.backend.service.SteamAuthService;
 import dev.tylerpac.backend.service.UserTokenService;
+import dev.tylerpac.backend.util.JsonUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import tools.jackson.databind.JsonNode;
@@ -112,11 +113,7 @@ public class AuthController {
                 + "&subscriptionStatus=" + urlEncode(authResponse.getSubscriptionStatus() == null ? "none" : authResponse.getSubscriptionStatus())
                 + "&username=" + urlEncode(user.getUsername());
             return ResponseEntity.status(HttpStatus.FOUND).header("Location", redirect).build();
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", frontendBaseUrl + "/steam-callback?error=" + urlEncode(ex.getMessage()))
-                .build();
-        } catch (IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.FOUND)
                 .header("Location", frontendBaseUrl + "/steam-callback?error=" + urlEncode(ex.getMessage()))
                 .build();
@@ -207,14 +204,10 @@ public class AuthController {
                 + "&discordUserId=" + urlEncode(profile.id())
                 + "&discordUsername=" + urlEncode(profile.username());
                 return ResponseEntity.status(HttpStatus.FOUND).header("Location", redirect).build();
-        } catch (IllegalArgumentException ex) {
-                return ResponseEntity.status(HttpStatus.FOUND)
-                    .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode(ex.getMessage()))
-                    .build();
-        } catch (IllegalStateException ex) {
-                return ResponseEntity.status(HttpStatus.FOUND)
-                    .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode(ex.getMessage()))
-                    .build();
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode(ex.getMessage()))
+                .build();
             } catch (DataIntegrityViolationException ex) {
                 return ResponseEntity.status(HttpStatus.FOUND)
                     .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode("discord_account_already_linked"))
@@ -274,11 +267,7 @@ public class AuthController {
                 + "/github-callback?status=" + urlEncode("github_linked")
                 + "&githubUsername=" + urlEncode(profile.login());
             return ResponseEntity.status(HttpStatus.FOUND).header("Location", redirect).build();
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode(ex.getMessage()))
-                .build();
-        } catch (IllegalStateException ex) {
+        } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.FOUND)
                 .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode(ex.getMessage()))
                 .build();
@@ -399,7 +388,7 @@ public class AuthController {
 
         if (body == null || !body.containsKey("userId")) return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("missing_userId");
         long userId;
-        try { userId = Long.parseLong(body.get("userId")); } catch (Exception e) { return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("invalid_userId"); }
+        try { userId = Long.parseLong(body.get("userId")); } catch (NumberFormatException e) { return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("invalid_userId"); }
 
         var userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) return ResponseEntity.status(HttpStatus.NOT_FOUND).body("user_not_found");
@@ -418,23 +407,24 @@ public class AuthController {
         String tab = body.containsKey("tab") ? body.get("tab") : "Sheet1";
 
         try {
-            String newId = null;
-            JsonNode createdMeta = null;
+            String newId = "";
+            JsonNode createdMeta;
             boolean usedDriveCopy = false;
 
             try {
                 JsonNode copyResp = googleOAuthService.copyFileAs(accessToken, templateId, name);
-                newId = copyResp.path("id").asText("");
-                if (newId != null && !newId.isEmpty()) {
-                    createdMeta = googleOAuthService.fetchSpreadsheetMetadata(accessToken, newId);
+                String tmpId = JsonUtils.textOrNull(copyResp.path("id"));
+                newId = tmpId == null ? "" : tmpId;
+                if (!newId.isEmpty()) {
                     usedDriveCopy = true;
                 }
             } catch (Exception ignored) {}
 
-            if (newId == null || newId.isEmpty()) {
+            if (newId.isEmpty()) {
                 createdMeta = googleOAuthService.createSpreadsheetFromTemplate(accessToken, templateId, name);
-                newId = createdMeta.path("spreadsheetId").asText("");
-                if (newId == null || newId.isEmpty()) return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
+                String tmpNewId = JsonUtils.textOrNull(createdMeta.path("spreadsheetId"));
+                newId = tmpNewId == null ? "" : tmpNewId;
+                if (newId.isEmpty()) return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
             }
 
             // try to fetch values
@@ -444,7 +434,7 @@ public class AuthController {
                     JsonNode meta = googleOAuthService.fetchSpreadsheetMetadata(accessToken, newId);
                     JsonNode sheets = meta.path("sheets");
                     if (sheets.isArray() && sheets.size() > 0) {
-                        String first = sheets.get(0).path("properties").path("title").asText(null);
+                        String first = JsonUtils.textOrNull(sheets.get(0).path("properties").path("title"));
                         if (first != null && !first.isBlank()) raw = googleOAuthService.fetchSheetValues(accessToken, newId, first + "!A:ZZ");
                     }
                 } catch (Exception ex) { }

@@ -27,6 +27,7 @@ import dev.tylerpac.backend.service.CryptoUtil;
 import dev.tylerpac.backend.service.GoogleOAuthService;
 import dev.tylerpac.backend.service.SheetsParsingService;
 import dev.tylerpac.backend.service.UserTokenService;
+import dev.tylerpac.backend.util.JsonUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import tools.jackson.databind.JsonNode;
 
@@ -104,7 +105,7 @@ public class GoogleController {
             if (providedName == null || providedName.isBlank()) {
                 try {
                     JsonNode meta = googleOAuthService.fetchSpreadsheetMetadata(accessToken, spreadsheetId);
-                    String title = meta.path("properties").path("title").asText(null);
+                    String title = JsonUtils.textOrNull(meta.path("properties").path("title"));
                     if (title != null && !title.isBlank()) name = title;
                 } catch (Exception ignored) {}
             }
@@ -162,7 +163,7 @@ public class GoogleController {
             for (var t : list) {
                 try {
                     JsonNode meta = googleOAuthService.fetchSpreadsheetMetadata(token, t.getSpreadsheetId());
-                    String title = meta.path("properties").path("title").asText(null);
+                    String title = JsonUtils.textOrNull(meta.path("properties").path("title"));
                     if (title != null && !title.isBlank() && !title.equals(t.getName())) {
                         t.setName(title);
                         t.setUpdatedAt(now);
@@ -282,38 +283,39 @@ public class GoogleController {
         String name = body != null && body.containsKey("name") ? body.get("name") : "Loot Table - Copy";
         String tab = body != null && body.containsKey("tab") ? body.get("tab") : "Sheet1";
         try {
-            String newId = null;
-            JsonNode createdMeta = null;
+            String newId = "";
+            JsonNode createdMeta;
             boolean usedDriveCopy = false;
 
             // First, try Drive's files.copy which preserves formatting/formatting and other metadata.
-            try {
-                JsonNode copyResp = googleOAuthService.copyFileAs(accessToken, templateId, name);
-                newId = copyResp.path("id").asText("");
-                // fetch metadata for sheets
-                if (newId != null && !newId.isEmpty()) {
-                    createdMeta = googleOAuthService.fetchSpreadsheetMetadata(accessToken, newId);
-                    usedDriveCopy = true;
-                }
-            } catch (Exception driveEx) {
+                try {
+                    JsonNode copyResp = googleOAuthService.copyFileAs(accessToken, templateId, name);
+                    String tmp = JsonUtils.textOrNull(copyResp.path("id"));
+                    newId = tmp == null ? "" : tmp;
+                    if (!newId.isEmpty()) {
+                        usedDriveCopy = true;
+                    }
+                } catch (Exception driveEx) {
                 // Drive copy failed, fall back to sheets.copyTo
             }
 
             // Second attempt: sheets.copyTo — copies each sheet WITH formatting using Sheets API
-            if (newId == null || newId.isEmpty()) {
+            if (newId.isEmpty()) {
                 try {
                     createdMeta = googleOAuthService.copySpreadsheetWithFormatting(accessToken, templateId, name);
-                    newId = createdMeta.path("spreadsheetId").asText("");
-                    if (newId != null && !newId.isEmpty()) usedDriveCopy = true;
+                    String tmp2 = JsonUtils.textOrNull(createdMeta.path("spreadsheetId"));
+                    newId = tmp2 == null ? "" : tmp2;
+                    if (!newId.isEmpty()) usedDriveCopy = true;
                 } catch (Exception copyEx) {
                     // sheets.copyTo failed, fall back to plain create+values
                 }
             }
 
-            if (newId == null || newId.isEmpty()) {
+            if (newId.isEmpty()) {
                 createdMeta = googleOAuthService.createSpreadsheetFromTemplate(accessToken, templateId, name);
-                newId = createdMeta.path("spreadsheetId").asText("");
-                if (newId == null || newId.isEmpty()) return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
+                String tmp3 = JsonUtils.textOrNull(createdMeta.path("spreadsheetId"));
+                newId = tmp3 == null ? "" : tmp3;
+                if (newId.isEmpty()) return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
             }
 
             // Parse all 3 tabs exactly like the Python reference parser
@@ -340,6 +342,7 @@ public class GoogleController {
                 "spreadsheetId", newId,
                 "parsed", parsed,
                 "name", name,
+                "tab", tab,
                 "usedDriveCopy", usedDriveCopy
             ));
         } catch (IllegalArgumentException | IllegalStateException ex) {
