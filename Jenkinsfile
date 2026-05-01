@@ -68,11 +68,43 @@ APP_SHOP_GITHUB_REPO_WEAPON_SYSTEM=OverKill-Dayz/DankOpticsPack,OverKill-Dayz/Da
 APP_SHOP_GITHUB_REPO_BATTLE_PASS=OverKill-Dayz/BattlePass,OverKill-Dayz/UniversalApi
 EOF
 '''
-                    // Stop any previous backend/frontend containers (do not touch external mysql)
-                    sh 'docker compose -f docker-compose.yml stop backend frontend || true'
-                    sh 'docker compose -f docker-compose.yml build --no-cache --pull'
-                    // Start backend/frontend only without bringing up dependencies (no MySQL container)
-                    sh 'docker compose -f docker-compose.yml up -d --no-deps backend frontend'
+                                        // Stop any previous backend/frontend containers (do not touch external mysql)
+                                        sh 'docker compose -f docker-compose.yml stop backend frontend || true'
+                                        sh 'docker compose -f docker-compose.yml build --no-cache --pull'
+
+                                        // Create a temporary docker-compose override that adds Traefik labels
+                                        sh '''
+cat > docker-compose.traefik.override.yml <<'YAML'
+version: "3.8"
+services:
+    frontend:
+        labels:
+            - "traefik.enable=true"
+            - "traefik.docker.network=overkill_net"
+            - "traefik.http.routers.overkill.rule=Host(\"overkilldayz.com\",\"www.overkilldayz.com\")"
+            - "traefik.http.routers.overkill.entrypoints=websecure"
+            - "traefik.http.routers.overkill.tls=true"
+            - "traefik.http.routers.overkill.tls.certresolver=myresolver"
+            - "traefik.http.services.overkill.loadbalancer.server.port=80"
+        networks:
+            - overkill_net
+
+networks:
+    overkill_net:
+        external: true
+YAML
+'''
+
+                                        // If a Traefik container exists, attach it to the project's docker network so it can route
+                                        sh '''
+for name in $(docker ps --format '{{.Names}}' | grep -i traefik || true); do
+    docker network inspect overkill_net >/dev/null 2>&1 || docker network create overkill_net
+    docker network connect overkill_net "$name" || true
+done
+'''
+
+                                        // Start backend/frontend using the override so Traefik labels are present (no MySQL container)
+                                        sh 'docker compose -f docker-compose.yml -f docker-compose.traefik.override.yml up -d --no-deps backend frontend'
                 }
             }
         }
@@ -80,8 +112,8 @@ EOF
 
     post {
         always {
-            // Remove the env files so secrets don't sit on disk
-            sh 'rm -f backend/.env.production frontend/.env.production'
+            // Remove the env files and temporary compose override so secrets don't sit on disk
+            sh 'rm -f backend/.env.production frontend/.env.production docker-compose.traefik.override.yml'
         }
         success {
             echo '✅ OverKill deployment successful — overkilldayz.com is live.'
