@@ -72,39 +72,11 @@ EOF
                                         sh 'docker compose -f docker-compose.yml stop backend frontend || true'
                                         sh 'docker compose -f docker-compose.yml build --no-cache --pull'
 
-                                        // Create a temporary docker-compose override that adds Traefik labels
-                                        sh '''
-cat > docker-compose.traefik.override.yml <<'YAML'
-version: "3.8"
-services:
-    frontend:
-        labels:
-            - "traefik.enable=true"
-            - "traefik.docker.network=overkill_net"
-            - "traefik.http.routers.overkill.rule=Host(\"overkilldayz.com\",\"www.overkilldayz.com\")"
-            - "traefik.http.routers.overkill.entrypoints=websecure"
-            - "traefik.http.routers.overkill.tls=true"
-            - "traefik.http.routers.overkill.tls.certresolver=myresolver"
-            - "traefik.http.services.overkill.loadbalancer.server.port=80"
-        networks:
-            - overkill_net
+                                        // Validate compose and (re)create services so Traefik labels/networks are applied
+                                        sh 'docker compose -f docker-compose.yml config -q'
 
-networks:
-    overkill_net:
-        external: true
-YAML
-'''
-
-                                        // If a Traefik container exists, attach it to the project's docker network so it can route
-                                        sh '''
-for name in $(docker ps --format '{{.Names}}' | grep -i traefik || true); do
-    docker network inspect overkill_net >/dev/null 2>&1 || docker network create overkill_net
-    docker network connect overkill_net "$name" || true
-done
-'''
-
-                                        // Start backend/frontend using the override so Traefik labels are present (no MySQL container)
-                                        sh 'docker compose -f docker-compose.yml -f docker-compose.traefik.override.yml up -d --no-deps backend frontend'
+                                        // Force recreate so frontend picks up labels/networks already declared in docker-compose.yml
+                                        sh 'docker compose -f docker-compose.yml up -d --no-deps --force-recreate backend frontend'
                 }
             }
         }
