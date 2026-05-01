@@ -1,6 +1,12 @@
 {
   "properties": [
     {
+      "name": "app.admin.steam64-ids",
+      "type": "java.lang.String",
+      "description": "Comma-separated list of Steam64 IDs that have admin access to the shop admin panel.",
+      "defaultValue": ""
+    },
+    {
       "name": "spring.flyway.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether to enable Flyway database migrations.",

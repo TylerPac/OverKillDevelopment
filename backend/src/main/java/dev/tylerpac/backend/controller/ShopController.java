@@ -1,16 +1,22 @@
 package dev.tylerpac.backend.controller;
 
 import java.security.Principal;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,15 +51,21 @@ public class ShopController {
     private final StripeShopService stripeShopService;
     private final ShopDownloadService shopDownloadService;
     private final UserRepository userRepository;
+    private final Set<String> adminSteam64Ids;
 
     public ShopController(
         StripeShopService stripeShopService,
         ShopDownloadService shopDownloadService,
-        UserRepository userRepository
+        UserRepository userRepository,
+        @Value("${app.admin.steam64-ids:}") String adminSteam64IdsRaw
     ) {
         this.stripeShopService = stripeShopService;
         this.shopDownloadService = shopDownloadService;
         this.userRepository = userRepository;
+        this.adminSteam64Ids = Arrays.stream(adminSteam64IdsRaw.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .collect(Collectors.toSet());
     }
 
     @GetMapping("/products")
@@ -337,6 +349,99 @@ public class ShopController {
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
         }
+    }
+
+    // ── Admin endpoints (JWT-authenticated, Steam admin only) ────────────────
+
+    @GetMapping("/admin/codes")
+    public ResponseEntity<?> adminListCodes(Principal principal) {
+        try {
+            requireAdminUser(principal);
+            return ResponseEntity.ok(stripeShopService.listAllAccessCodes());
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    @PostMapping("/admin/codes/full-unlock")
+    public ResponseEntity<?> adminCreateFullUnlockCode(
+        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
+        Principal principal
+    ) {
+        try {
+            requireAdminUser(principal);
+            String requestedCode = request != null ? request.getCode() : null;
+            CreateFullAccessCodeResponse response = stripeShopService.createAccessCodeTrusted(requestedCode, Collections.emptyList());
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    @PostMapping("/admin/codes/create")
+    public ResponseEntity<?> adminCreateCode(
+        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
+        Principal principal
+    ) {
+        try {
+            requireAdminUser(principal);
+            String requestedCode = request != null ? request.getCode() : null;
+            List<String> productIds = request != null ? request.getProductIds() : null;
+            CreateFullAccessCodeResponse response = stripeShopService.createAccessCodeTrusted(requestedCode, productIds);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    @PostMapping("/admin/codes/{id}/revoke")
+    public ResponseEntity<?> adminRevokeCode(@PathVariable Long id, Principal principal) {
+        try {
+            requireAdminUser(principal);
+            stripeShopService.revokeAccessCode(id);
+            return ResponseEntity.ok(Map.of("revoked", true));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                case "access_code_not_found" -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    @DeleteMapping("/admin/codes/{id}")
+    public ResponseEntity<?> adminDeleteCode(@PathVariable Long id, Principal principal) {
+        try {
+            requireAdminUser(principal);
+            stripeShopService.deleteAccessCode(id);
+            return ResponseEntity.ok(Map.of("deleted", true));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                case "access_code_not_found" -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+                case "access_code_not_revoked" -> ResponseEntity.badRequest().body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private User requireAdminUser(Principal principal) {
+        User user = requireUser(principal);
+        if (adminSteam64Ids.isEmpty() || !adminSteam64Ids.contains(user.getSteam64Id())) {
+            throw new IllegalArgumentException("forbidden");
+        }
+        return user;
     }
 
     private User requireUser(Principal principal) {

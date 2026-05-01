@@ -11,6 +11,7 @@ import {
   redeemFullAccessCode,
   syncCheckoutFromSession,
 } from './services/shopService';
+import AdminView from './views/AdminView';
 import AuthView from './views/AuthView';
 import CartView from './views/CartView';
 import DashboardView from './views/DashboardView';
@@ -19,6 +20,8 @@ import { PrivacyView, RefundView, TermsView } from './views/PolicyViews';
 import ProductDetailView from './views/ProductDetailView';
 import ShopView from './views/ShopView';
 import TierPainterView from './views/TierPainterView';
+
+const ADMIN_STEAM_ID = '76561199155324762';
 
 export default function App() {
   const [view, setView] = useState('home');
@@ -37,6 +40,8 @@ export default function App() {
     setView('home');
     setStatus(message);
   });
+
+  const isAdmin = session.steam64Id === ADMIN_STEAM_ID;
 
 
   // Ensure products are loaded on home and shop views
@@ -125,6 +130,13 @@ export default function App() {
         await session.loadAuthProfile(tokenFromUrl);
       } catch {
         // Keep the sign-in successful even if the profile refresh fails.
+      }
+
+      try {
+        const nextOrders = await getOrders(tokenFromUrl);
+        setOrders(Array.isArray(nextOrders) ? nextOrders : []);
+      } catch {
+        // Non-fatal — dashboard will just show no orders.
       }
 
       setView('dashboard');
@@ -644,6 +656,9 @@ export default function App() {
           {session.authenticated ? (
             <>
               <button type="button" onClick={openCustomer} style={navBtnStyle}>Dashboard</button>
+              {isAdmin && (
+                <button type="button" onClick={() => setView('admin')} style={{ ...navBtnStyle, color: '#fda', borderColor: '#643' }}>Admin</button>
+              )}
               <button type="button" onClick={signOut} style={{ ...navBtnStyle, color: '#f88', borderColor: '#633' }}>Log Out</button>
             </>
           ) : (
@@ -726,6 +741,9 @@ export default function App() {
           shopLoading={shopLoading}
           accountSetupComplete={session.accountSetupComplete}
         />
+      )}
+      {view === 'admin' && isAdmin && (
+        <AdminView token={session.token} />
       )}
       {view === 'terms' && <TermsView />}
       {view === 'privacy' && <PrivacyView />}

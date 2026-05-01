@@ -300,20 +300,17 @@ public class SheetsParsingService {
 
             int dataStart = itemHdrRow + 1;
             List<Map<String, Object>> items = new ArrayList<>();
-            Map<String, Object> currentItem = null;
-            int blanks = 0;
+            Map<String, Object> currentItem = null;            List<Map<String, Object>> currentSlots = null;            int blanks = 0;
 
             for (int r = dataStart; r < rect.size(); r++) {
                 String itemName = getCell(rect, r, itemCol);
-                if (isBlankCell(itemName) && currentItem != null && slotProfileCol != -1) {
+                if (isBlankCell(itemName) && currentItem != null && currentSlots != null && slotProfileCol != -1) {
                     String sp = getCell(rect, r, slotProfileCol);
                     if (!isBlankCell(sp)) {
                         Double prob = toDoubleOrNull(getCell(rect, r, slotProbCol));
                         if (prob != null) {
-                            @SuppressWarnings("unchecked")
-                            List<Map<String, Object>> slots = (List<Map<String, Object>>) currentItem.get("Slots");
                             Map<String, Object> s = new LinkedHashMap<>(); s.put("Profile", sp.trim()); s.put("SpawnProb", prob);
-                            slots.add(s);
+                            currentSlots.add(s);
                         }
                         continue;
                     }
@@ -330,7 +327,7 @@ public class SheetsParsingService {
                 Double qmax = toDoubleOrNull(getCell(rect, r, qmaxCol));
                 Double hmin = toDoubleOrNull(getCell(rect, r, hminCol));
                 Double hmax = toDoubleOrNull(getCell(rect, r, hmaxCol));
-                if (spawnProb == null || qmin == null || qmax == null || hmin == null || hmax == null) { currentItem = null; continue; }
+                if (spawnProb == null || qmin == null || qmax == null || hmin == null || hmax == null) { currentItem = null; currentSlots = null; continue; }
 
                 currentItem = new LinkedHashMap<>();
                 currentItem.put("ItemName", itemName.trim());
@@ -339,17 +336,16 @@ public class SheetsParsingService {
                 currentItem.put("ItemQuantityMax", qmax);
                 currentItem.put("ItemHealthMin", hmin);
                 currentItem.put("ItemHealthMax", hmax);
-                currentItem.put("Slots", new ArrayList<Map<String,Object>>());
+                currentSlots = new ArrayList<>();
+                currentItem.put("Slots", currentSlots);
 
                 if (slotProfileCol != -1) {
                     String sp = getCell(rect, r, slotProfileCol);
                     if (!isBlankCell(sp)) {
                         Double prob = toDoubleOrNull(getCell(rect, r, slotProbCol));
                         if (prob != null) {
-                            @SuppressWarnings("unchecked")
-                            List<Map<String,Object>> slots = (List<Map<String,Object>>) currentItem.get("Slots");
                             Map<String,Object> s = new LinkedHashMap<>(); s.put("Profile", sp.trim()); s.put("SpawnProb", prob);
-                            slots.add(s);
+                            currentSlots.add(s);
                         }
                     }
                 }
@@ -535,6 +531,7 @@ public class SheetsParsingService {
         List<String> header = rows.get(startIndex);
         int i = startIndex + 1;
         Map<String, Map<String, Object>> profileMap = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> profileItemsMap = new LinkedHashMap<>();
         while (i < rows.size()) {
             List<String> row = rows.get(i);
             if (row == null || row.stream().allMatch(c -> c == null || c.trim().isEmpty())) break;
@@ -550,11 +547,13 @@ public class SheetsParsingService {
 
             String profileName = flat.containsKey("Profile") ? flat.get("Profile") : (flat.containsKey("profile") ? flat.get("profile") : "");
             if (profileName == null) profileName = "";
-            Map<String, Object> profileObj = profileMap.computeIfAbsent(profileName, k -> {
+            List<Map<String, Object>> profileItems = profileItemsMap.computeIfAbsent(profileName, k -> {
+                List<Map<String, Object>> list = new ArrayList<>();
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("Profile", k);
-                m.put("Items", new ArrayList<Map<String, Object>>());
-                return m;
+                m.put("Items", list);
+                profileMap.put(k, m);
+                return list;
             });
 
             Map<String, Object> item = new LinkedHashMap<>();
@@ -563,9 +562,7 @@ public class SheetsParsingService {
                 if ("Profile".equalsIgnoreCase(key)) continue;
                 item.put(key, toTypedValue(e.getValue()));
             }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> items = (List<Map<String, Object>>) profileObj.get("Items");
-            items.add(item);
+            profileItems.add(item);
             i++;
         }
 

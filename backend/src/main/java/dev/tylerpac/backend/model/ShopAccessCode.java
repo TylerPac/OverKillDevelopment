@@ -28,6 +28,9 @@ public class ShopAccessCode {
     @Column(nullable = false)
     private boolean fullAccess = true;
 
+    @Column(nullable = false)
+    private boolean revoked = false;
+
     @Column(length = 1024)
     private String productIdsCsv;
 
@@ -45,14 +48,14 @@ public class ShopAccessCode {
     private Instant updatedAt;
 
     @PrePersist
-    void onCreate() {
+    protected void onCreate() {
         Instant now = Instant.now();
         this.createdAt = now;
         this.updatedAt = now;
     }
 
     @PreUpdate
-    void onUpdate() {
+    protected void onUpdate() {
         this.updatedAt = Instant.now();
     }
 
@@ -86,6 +89,14 @@ public class ShopAccessCode {
 
     public void setFullAccess(boolean fullAccess) {
         this.fullAccess = fullAccess;
+    }
+
+    public boolean isRevoked() {
+        return revoked;
+    }
+
+    public void setRevoked(boolean revoked) {
+        this.revoked = revoked;
     }
 
     public String getProductIdsCsv() {

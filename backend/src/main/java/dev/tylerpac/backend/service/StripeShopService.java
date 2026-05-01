@@ -35,6 +35,7 @@ import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 
+import dev.tylerpac.backend.dto.AccessCodeAdminResponse;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
 import dev.tylerpac.backend.dto.CreateFullAccessCodeResponse;
 import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
@@ -171,11 +172,99 @@ public class StripeShopService {
         return createAccessCode(requestedCode, Collections.emptyList(), adminToken);
     }
 
+    /** Creates an access code without the admin-token check — for use by JWT-authenticated admin endpoints only. */
+    @Transactional
+    public CreateFullAccessCodeResponse createAccessCodeTrusted(String requestedCode, List<String> requestedProductIds) {
+        String normalizedCode = normalizeAccessCode(requestedCode, true);
+        if (!StringUtils.hasText(normalizedCode)) {
+            normalizedCode = generateUniqueAccessCode();
+        }
+
+        if (shopAccessCodeRepository.existsByCode(normalizedCode)) {
+            throw new IllegalArgumentException("code_already_exists");
+        }
+
+        List<ShopProductResponse> scopedProducts = resolveScopedProducts(requestedProductIds);
+        boolean fullAccess = scopedProducts.isEmpty();
+
+        ShopAccessCode accessCode = new ShopAccessCode();
+        accessCode.setCode(normalizedCode);
+        accessCode.setFullAccess(fullAccess);
+        accessCode.setProductIdsCsv(fullAccess
+            ? null
+            : scopedProducts.stream().map(ShopProductResponse::getId).collect(Collectors.joining(",")));
+
+        try {
+            shopAccessCodeRepository.save(accessCode);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalArgumentException("code_already_exists");
+        }
+
+        List<String> scopedProductIds = fullAccess
+            ? List.of()
+            : scopedProducts.stream().map(ShopProductResponse::getId).toList();
+
+        return new CreateFullAccessCodeResponse(
+            normalizedCode,
+            true,
+            fullAccess,
+            scopedProductIds,
+            fullAccess ? getProducts().size() : scopedProductIds.size()
+        );
+    }
+
+    public List<AccessCodeAdminResponse> listAllAccessCodes() {
+        return shopAccessCodeRepository.findAllByOrderByCreatedAtDesc().stream()
+            .map(ac -> {
+                List<String> productIds = (ac.getProductIdsCsv() != null && !ac.getProductIdsCsv().isBlank())
+                    ? List.of(ac.getProductIdsCsv().split(","))
+                    : List.of();
+                String redeemedByUsername = ac.getRedeemedByUser() != null
+                    ? ac.getRedeemedByUser().getUsername() : null;
+                String redeemedAt = ac.getRedeemedAt() != null
+                    ? ac.getRedeemedAt().toString() : null;
+                return new AccessCodeAdminResponse(
+                    ac.getId(),
+                    ac.getCode(),
+                    ac.isFullAccess(),
+                    productIds,
+                    ac.getRedeemedAt() != null,
+                    redeemedByUsername,
+                    redeemedAt,
+                    ac.isRevoked(),
+                    ac.getCreatedAt().toString()
+                );
+            })
+            .toList();
+    }
+
+    @Transactional
+    public void revokeAccessCode(Long id) {
+        ShopAccessCode accessCode = shopAccessCodeRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("access_code_not_found"));
+        accessCode.setRevoked(true);
+        shopAccessCodeRepository.save(accessCode);
+    }
+
+    @Transactional
+    public void deleteAccessCode(Long id) {
+        ShopAccessCode accessCode = shopAccessCodeRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("access_code_not_found"));
+        if (!accessCode.isRevoked()) {
+            throw new IllegalArgumentException("access_code_not_revoked");
+        }
+        shopAccessCodeRepository.delete(accessCode);
+    }
+
     @Transactional
     public RedeemFullAccessCodeResponse redeemFullAccessCode(User user, String rawCode) {
         String code = normalizeAccessCode(rawCode, false);
         ShopAccessCode accessCode = shopAccessCodeRepository.findByCode(code)
             .orElseThrow(() -> new IllegalArgumentException("invalid_access_code"));
+
+        if (accessCode.isRevoked()) {
+            throw new IllegalArgumentException("invalid_access_code");
+        }
 
         if (accessCode.getRedeemedAt() != null) {
             throw new IllegalArgumentException("access_code_already_redeemed");
