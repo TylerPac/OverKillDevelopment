@@ -217,6 +217,7 @@ public class StripeShopService {
         );
     }
 
+    @Transactional(readOnly = true)
     public List<AccessCodeAdminResponse> listAllAccessCodes() {
         return shopAccessCodeRepository.findAllByOrderByCreatedAtDesc().stream()
             .map(ac -> {
