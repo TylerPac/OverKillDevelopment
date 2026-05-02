@@ -6,6 +6,8 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -43,6 +45,8 @@ import tools.jackson.databind.JsonNode;
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final UserRepository userRepository;
     private final ShopOrderRepository shopOrderRepository;
@@ -213,6 +217,7 @@ public class AuthController {
                     .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode("discord_account_already_linked"))
                     .build();
             } catch (Exception ex) {
+                log.error("Unexpected error during Discord callback", ex);
                 return ResponseEntity.status(HttpStatus.FOUND)
                     .header("Location", frontendBaseUrl + "/discord-callback?error=" + urlEncode("internal_error"))
                     .build();
@@ -276,6 +281,7 @@ public class AuthController {
                 .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("github_account_already_linked"))
                 .build();
         } catch (Exception ex) {
+            log.error("Unexpected error during GitHub callback", ex);
             return ResponseEntity.status(HttpStatus.FOUND)
                 .header("Location", frontendBaseUrl + "/github-callback?error=" + urlEncode("internal_error"))
                 .build();

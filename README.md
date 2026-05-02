@@ -131,3 +131,10 @@ Before public launch:
 4. Keep secrets only in environment/secret store (AWS Secrets Manager, Azure Key Vault, etc.).
 5. Do not commit `.env.development`/`.env.production` with real secrets.
 6. Configure Steam and Discord OAuth credentials in production environment variables.
+
+
+
+scp "E:\OVERKILLMODS\keycard-crates.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/keycard-crates.zip
+
+scp "E:\OVERKILLMODS\weapon-system.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/weapon-system.zip
+scp "E:\OVERKILLMODS\battle-pass.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/battle-pass.zip
