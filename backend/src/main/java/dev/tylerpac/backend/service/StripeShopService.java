@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -52,6 +54,8 @@ import dev.tylerpac.backend.repo.UserRepository;
 
 @Service
 public class StripeShopService {
+
+    private static final Logger log = LoggerFactory.getLogger(StripeShopService.class);
 
     private static final String DEFAULT_FRONTEND_URL = "http://localhost:5173";
     private static final String STATUS_PENDING = "PENDING";
@@ -975,7 +979,21 @@ public class StripeShopService {
     @Transactional
     protected String ensureStripeCustomer(User user) throws StripeException {
         if (StringUtils.hasText(user.getStripeCustomerId())) {
-            return user.getStripeCustomerId();
+            try {
+                Customer.retrieve(user.getStripeCustomerId());
+                return user.getStripeCustomerId();
+            } catch (StripeException e) {
+                if ("resource_missing".equals(e.getCode())) {
+                    // Stale customer ID (e.g. created in test mode, now using live key).
+                    // Clear it and fall through to create a fresh customer.
+                    log.warn("Stripe customer {} not found in current mode ({}), creating new customer for user {}",
+                            user.getStripeCustomerId(), e.getMessage(), user.getId());
+                    user.setStripeCustomerId(null);
+                    userRepository.save(user);
+                } else {
+                    throw e;
+                }
+            }
         }
 
         CustomerCreateParams params = CustomerCreateParams.builder()
