@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -47,6 +49,8 @@ import jakarta.validation.Valid;
 @RestController
 @RequestMapping("/shop")
 public class ShopController {
+
+    private static final Logger log = LoggerFactory.getLogger(ShopController.class);
 
     private final StripeShopService stripeShopService;
     private final ShopDownloadService shopDownloadService;
@@ -179,6 +183,7 @@ public class ShopController {
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(ex.getMessage());
         } catch (StripeException ex) {
+            log.error("Stripe error on cart-checkout-session: code={} message={}", ex.getCode(), ex.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ex.getMessage());
         }
     }
