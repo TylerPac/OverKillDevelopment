@@ -27,6 +27,8 @@ services:
     container_name: overkill-backend
     restart: unless-stopped
     env_file: ./backend/.env.production
+    volumes:
+      - /opt/overkill/downloads:/app/downloads
     depends_on:
       mysql:
         condition: service_healthy
