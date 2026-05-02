@@ -1010,21 +1010,21 @@ public class StripeShopService {
         products.put("keycard-crates", new ShopProductResponse(
             "keycard-crates",
             "KeyCard Crates",
-            "Keycard and Dynamic Crate Mod for DayZ",
+            "Automated crate spawning, keycard-locked doors, dynamic loot events, and no-code config for DayZ.",
             40000,
             currency
         ));
         products.put("weapon-system", new ShopProductResponse(
             "weapon-system",
             "Weapon System",
-            "Expanded assets + premium templates",
+            "150+ attachments, 100+ firearms, true part-on-part modularity, custom optics, and deployable bipods for DayZ.",
             40000,
             currency
         ));
         products.put("battle-pass", new ShopProductResponse(
             "battle-pass",
             "Battle Pass",
-            "Full bundle with lifetime updates",
+            "XP-based tier progression, weapon mastery, free and paid reward tracks — fully Bohemia-compliant.",
             40000,
             currency
         ));

@@ -35,13 +35,18 @@ export function RefundView() {
   return (
     <section style={sectionStyle}>
       <h2>Refund Policy</h2>
-      <p style={leadStyle}>For digital products, refunds are handled under the rules below.</p>
-      <ul>
-        <li>Refund requests are accepted within 14 days of purchase.</li>
-        <li>Refunds are available for duplicate purchases or technical delivery failures.</li>
-        <li>No refunds for policy violations, abuse, or completed custom work.</li>
-        <li>Approved refunds are returned to the original payment method via Stripe.</li>
-      </ul>
+      <p style={leadStyle}>
+        All sales are final. We do not offer refunds on any purchases.
+      </p>
+      <p>
+        All products sold by OverKill Development are digital goods. Upon purchase you are granted immediate access to the source code and associated files. Because the product is delivered digitally and cannot be returned, all transactions are non-refundable once completed.
+      </p>
+      <p>
+        Please review all product descriptions and preview materials carefully before purchasing. If you have questions about a product prior to purchase, contact us through our Discord community.
+      </p>
+      <p>
+        In the event of a technical delivery failure (e.g. you did not receive access after a successful payment), please contact us and we will resolve the issue promptly. This does not constitute a refund — it is a delivery correction.
+      </p>
     </section>
   );
 }
