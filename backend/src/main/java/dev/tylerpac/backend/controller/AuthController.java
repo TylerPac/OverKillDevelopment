@@ -190,7 +190,7 @@ public class AuthController {
 
         try {
             DiscordOAuthService.DiscordProfile profile = discordOAuthService.fetchProfileFromAuthorizationCode(code);
-            User user = userOpt.get();
+            User user = userRepository.findById(userOpt.get().getId()).orElseThrow();
 
             Optional<User> existingDiscordOwner = userRepository.findByDiscordUserId(profile.id());
             if (existingDiscordOwner.isPresent() && !existingDiscordOwner.get().getId().equals(user.getId())) {
@@ -255,7 +255,7 @@ public class AuthController {
 
         try {
             GitHubOAuthService.GitHubProfile profile = gitHubOAuthService.fetchProfileFromAuthorizationCode(code);
-            User user = userOpt.get();
+            User user = userRepository.findById(userOpt.get().getId()).orElseThrow();
 
             Optional<User> existingOwner = userRepository.findByGithubUserId(profile.id());
             if (existingOwner.isPresent() && !existingOwner.get().getId().equals(user.getId())) {
