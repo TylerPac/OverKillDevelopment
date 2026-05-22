@@ -10,5 +10,5 @@ import dev.tylerpac.backend.model.User;
 
 public interface DownloadTokenRepository extends JpaRepository<DownloadToken, String> {
     Optional<DownloadToken> findByIdAndUsedFalseAndExpiresAtAfter(String id, Instant now);
-    Optional<DownloadToken> findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(User user, String productId);
+    Optional<DownloadToken> findTopByUserAndProductIdAndUsedTrueOrderByExpiresAtDesc(User user, String productId);
 }
