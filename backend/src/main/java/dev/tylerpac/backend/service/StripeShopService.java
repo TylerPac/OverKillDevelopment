@@ -554,7 +554,11 @@ public class StripeShopService {
         return productReleaseRepository.findById(productId)
             .map(release -> downloadTokenRepository
                 .findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(user, productId)
-                .map(token -> release.getReleasedAt().isAfter(token.getCreatedAt()))
+                .map(token -> {
+                    Instant tokenTime = token.getCreatedAt();
+                    // tokenTime may be null for tokens created before the createdAt column was added
+                    return tokenTime == null || release.getReleasedAt().isAfter(tokenTime);
+                })
                 .orElse(true))
             .orElse(false);
     }
