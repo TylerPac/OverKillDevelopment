@@ -28,7 +28,7 @@ public class DownloadToken {
     @Column(nullable = false)
     private Instant expiresAt;
 
-    @Column(nullable = false, updatable = false)
+    @Column(nullable = true, updatable = false)
     private Instant createdAt;
 
     @Column(nullable = false)

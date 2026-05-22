@@ -551,16 +551,22 @@ public class StripeShopService {
     }
 
     private boolean computeHasUpdate(User user, String productId) {
-        return productReleaseRepository.findById(productId)
-            .map(release -> downloadTokenRepository
-                .findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(user, productId)
-                .map(token -> {
-                    Instant tokenTime = token.getCreatedAt();
-                    // tokenTime may be null for tokens created before the createdAt column was added
-                    return tokenTime == null || release.getReleasedAt().isAfter(tokenTime);
-                })
-                .orElse(true))
-            .orElse(false);
+        try {
+            return productReleaseRepository.findById(productId)
+                .map(release -> downloadTokenRepository
+                    .findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(user, productId)
+                    .map(token -> {
+                        Instant tokenTime = token.getCreatedAt();
+                        // tokenTime may be null for tokens created before the createdAt column was added
+                        return tokenTime == null || release.getReleasedAt().isAfter(tokenTime);
+                    })
+                    .orElse(true))
+                .orElse(false);
+        } catch (Exception e) {
+            // If the created_at column doesn't yet exist in the DB or any other error,
+            // don't let it crash the entire getOrders response
+            return false;
+        }
     }
 
     @Transactional
