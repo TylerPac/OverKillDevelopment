@@ -11,6 +11,8 @@ export default function CartView({
   accountSetupComplete,
 }) {
   const [accessCode, setAccessCode] = useState('');
+  const [redeemMessage, setRedeemMessage] = useState(null);
+  const [redeemSuccess, setRedeemSuccess] = useState(false);
   const cartProducts = products.filter((p) => cart.includes(p.id));
   const totalCents = cartProducts.reduce((sum, p) => sum + p.amountCents, 0);
   const currency = cartProducts[0]?.currency ?? 'usd';
@@ -21,8 +23,11 @@ export default function CartView({
       return;
     }
 
-    const redeemed = await onRedeemFullAccessCode(accessCode);
-    if (redeemed) {
+    setRedeemMessage(null);
+    const result = await onRedeemFullAccessCode(accessCode);
+    setRedeemMessage(result.message);
+    setRedeemSuccess(result.success);
+    if (result.success) {
       setAccessCode('');
     }
   }
@@ -82,6 +87,11 @@ export default function CartView({
         {!accountSetupComplete && (
           <p style={{ color: '#f4a261', fontSize: '0.8rem', margin: '0.65rem 0 0' }}>
             Link your Steam account before redeeming a code.
+          </p>
+        )}
+        {redeemMessage && (
+          <p style={{ color: redeemSuccess ? '#4dde8a' : '#f4a261', fontSize: '0.85rem', margin: '0.65rem 0 0' }}>
+            {redeemMessage}
           </p>
         )}
       </div>

@@ -386,16 +386,14 @@ export default function App() {
     if (!session.authenticated || !session.token) {
       setStatus('Please log in before redeeming a code.');
       setView('auth');
-      return false;
+      return { success: false, message: 'Please log in before redeeming a code.' };
     }
 
     if (!session.accountSetupComplete) {
-      setStatus('Account not setup. Link your Steam account before redeeming a code.');
-      return false;
+      return { success: false, message: 'Link your Steam account before redeeming a code.' };
     }
 
     setShopLoading(true);
-    setStatus('Redeeming full-access code...');
 
     try {
       const response = await redeemFullAccessCode(code, session.token);
@@ -405,34 +403,36 @@ export default function App() {
       setCart([]);
 
       const grantedCount = Number(response?.grantedCount || 0);
-      setStatus(
+      const msg =
         grantedCount > 0
           ? `Code redeemed. ${grantedCount} product${grantedCount === 1 ? '' : 's'} unlocked.`
-          : 'Code redeemed.',
-      );
-      return true;
+          : 'Code redeemed.';
+      setStatus(msg);
+      return { success: true, message: msg };
     } catch (error) {
+      let msg;
       switch (error.message) {
         case 'access_code_required':
-          setStatus('Enter a code before redeeming.');
+          msg = 'Enter a code before redeeming.';
           break;
         case 'invalid_access_code':
-          setStatus('That code was not recognized.');
+          msg = 'That code was not recognized.';
           break;
         case 'access_code_already_redeemed':
-          setStatus('That code has already been used.');
+          msg = 'That code has already been used.';
           break;
         case 'nothing_to_redeem':
-          setStatus('Your account already owns every shop product.');
+          msg = 'Your account already owns every product — nothing left to unlock.';
           break;
         case 'account_not_setup':
-          setStatus('Account not setup. Link your Steam account before redeeming a code.');
+          msg = 'Link your Steam account before redeeming a code.';
           break;
         default:
-          setStatus(`Code redeem failed: ${error.message}`);
+          msg = `Code redeem failed: ${error.message}`;
           break;
       }
-      return false;
+      setStatus(msg);
+      return { success: false, message: msg };
     } finally {
       setShopLoading(false);
     }
