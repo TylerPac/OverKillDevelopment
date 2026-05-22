@@ -556,8 +556,8 @@ public class StripeShopService {
                 .map(release -> downloadTokenRepository
                     .findTopByUserAndProductIdAndUsedTrueOrderByExpiresAtDesc(user, productId)
                     .map(token -> {
-                        // Approximate download time from expiresAt (expiresAt = download time + TOKEN_TTL_SECONDS)
-                        Instant approxDownloadTime = token.getExpiresAt().minusSeconds(TOKEN_TTL_SECONDS);
+                        // Approximate download time from expiresAt (token TTL is 600s)
+                        Instant approxDownloadTime = token.getExpiresAt().minusSeconds(600);
                         return release.getReleasedAt().isAfter(approxDownloadTime);
                     })
                     .orElse(true))
