@@ -337,6 +337,48 @@ public class ShopController {
         }
     }
 
+    @PostMapping("/download-token/{productId}")
+    public ResponseEntity<?> issueDownloadToken(@PathVariable String productId, Principal principal) {
+        try {
+            User user = requireUser(principal);
+            String token = shopDownloadService.issueDownloadToken(user, productId);
+            return ResponseEntity.ok(Map.of("token", token));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "account_not_setup", "purchase_required" ->
+                    ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                case "download_not_found" ->
+                    ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+                case "invalid_product" ->
+                    ResponseEntity.badRequest().body(ex.getMessage());
+                default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+            };
+        }
+    }
+
+    @GetMapping("/download-stream")
+    public ResponseEntity<?> downloadStream(@RequestParam String token) {
+        try {
+            ShopDownloadService.DownloadAsset asset = shopDownloadService.consumeDownloadToken(token);
+
+            String contentType = StringUtils.hasText(asset.contentType())
+                ? asset.contentType()
+                : MediaType.APPLICATION_OCTET_STREAM_VALUE;
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + asset.fileName() + "\"")
+                .body(asset.resource());
+        } catch (IllegalArgumentException ex) {
+            if ("invalid_token".equals(ex.getMessage())) {
+                return ResponseEntity.status(HttpStatus.GONE).body("invalid_or_expired_token");
+            }
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("download_unavailable");
+        }
+    }
+
     @PostMapping("/webhook")
     public ResponseEntity<?> webhook(
         @RequestBody String payload,

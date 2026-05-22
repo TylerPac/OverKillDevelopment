@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useSessionState from './hooks/useSessionState';
 import { getDiscordLinkUrl, getGithubLinkUrl, getSteamLoginUrl } from './services/authService';
-import { callProtectedText, downloadProductBlob, getProductDownloadLink } from './services/apiClient';
+import { apiBase, callProtectedText, issueDownloadToken, getProductDownloadLink } from './services/apiClient';
 import {
   createCartCheckoutSession,
   createCheckoutSession,
@@ -525,17 +525,9 @@ export default function App() {
         return;
       }
 
-      // Fall back to zip blob download
-      const { blob, fileName } = await downloadProductBlob(productId, session.token);
-
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
+      // Get a short-lived token and let the browser handle the download natively
+      const dlToken = await issueDownloadToken(productId, session.token);
+      window.location.href = `${apiBase}/shop/download-stream?token=${encodeURIComponent(dlToken)}`;
 
       setStatus('Download started.');
     } catch (error) {
