@@ -25,7 +25,9 @@ import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
 import dev.tylerpac.backend.model.ShopAccessCode;
 import dev.tylerpac.backend.model.ShopOrder;
 import dev.tylerpac.backend.model.User;
+import dev.tylerpac.backend.repo.DownloadTokenRepository;
 import dev.tylerpac.backend.repo.ProcessedStripeEventRepository;
+import dev.tylerpac.backend.repo.ProductReleaseRepository;
 import dev.tylerpac.backend.repo.ShopAccessCodeRepository;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserRepository;
@@ -41,6 +43,12 @@ class StripeShopServiceTest {
 
     @Mock
     private ProcessedStripeEventRepository processedStripeEventRepository;
+
+    @Mock
+    private DownloadTokenRepository downloadTokenRepository;
+
+    @Mock
+    private ProductReleaseRepository productReleaseRepository;
 
     @Mock
     private PurchaseEmailService purchaseEmailService;
@@ -59,6 +67,8 @@ class StripeShopServiceTest {
             shopAccessCodeRepository,
             shopOrderRepository,
             processedStripeEventRepository,
+            downloadTokenRepository,
+            productReleaseRepository,
             purchaseEmailService,
             userRepository,
             gitHubRepoService,
