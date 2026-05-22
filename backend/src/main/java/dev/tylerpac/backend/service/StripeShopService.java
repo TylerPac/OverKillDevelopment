@@ -47,7 +47,9 @@ import dev.tylerpac.backend.model.ProcessedStripeEvent;
 import dev.tylerpac.backend.model.ShopAccessCode;
 import dev.tylerpac.backend.model.ShopOrder;
 import dev.tylerpac.backend.model.User;
+import dev.tylerpac.backend.repo.DownloadTokenRepository;
 import dev.tylerpac.backend.repo.ProcessedStripeEventRepository;
+import dev.tylerpac.backend.repo.ProductReleaseRepository;
 import dev.tylerpac.backend.repo.ShopAccessCodeRepository;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserRepository;
@@ -68,6 +70,8 @@ public class StripeShopService {
     private final ShopAccessCodeRepository shopAccessCodeRepository;
     private final ShopOrderRepository shopOrderRepository;
     private final ProcessedStripeEventRepository processedStripeEventRepository;
+    private final DownloadTokenRepository downloadTokenRepository;
+    private final ProductReleaseRepository productReleaseRepository;
     private final PurchaseEmailService purchaseEmailService;
     private final UserRepository userRepository;
     private final GitHubRepoService gitHubRepoService;
@@ -82,6 +86,8 @@ public class StripeShopService {
         ShopAccessCodeRepository shopAccessCodeRepository,
         ShopOrderRepository shopOrderRepository,
         ProcessedStripeEventRepository processedStripeEventRepository,
+        DownloadTokenRepository downloadTokenRepository,
+        ProductReleaseRepository productReleaseRepository,
         PurchaseEmailService purchaseEmailService,
         UserRepository userRepository,
         GitHubRepoService gitHubRepoService,
@@ -96,6 +102,8 @@ public class StripeShopService {
         this.shopAccessCodeRepository = shopAccessCodeRepository;
         this.shopOrderRepository = shopOrderRepository;
         this.processedStripeEventRepository = processedStripeEventRepository;
+        this.downloadTokenRepository = downloadTokenRepository;
+        this.productReleaseRepository = productReleaseRepository;
         this.purchaseEmailService = purchaseEmailService;
         this.userRepository = userRepository;
         this.gitHubRepoService = gitHubRepoService;
@@ -534,8 +542,21 @@ public class StripeShopService {
     @Transactional(readOnly = true)
     public List<ShopOrderResponse> getOrders(User user) {
         return shopOrderRepository.findByUserOrderByCreatedAtDesc(user).stream()
-            .map(this::toResponse)
+            .map(order -> {
+                ShopOrderResponse resp = toResponse(order);
+                resp.setHasUpdate(computeHasUpdate(user, order.getProductId()));
+                return resp;
+            })
             .toList();
+    }
+
+    private boolean computeHasUpdate(User user, String productId) {
+        return productReleaseRepository.findById(productId)
+            .map(release -> downloadTokenRepository
+                .findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(user, productId)
+                .map(token -> release.getReleasedAt().isAfter(token.getCreatedAt()))
+                .orElse(true))
+            .orElse(false);
     }
 
     @Transactional

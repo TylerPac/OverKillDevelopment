@@ -22,7 +22,24 @@ export default function CustomerView({ shopLoading, paidOrders, onDownload, onOp
               maxWidth: 560,
             }}
           >
-            <h3 style={{ marginBottom: '0.35rem' }}>{order.productName}</h3>
+            <h3 style={{ marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {order.productName}
+              {order.hasUpdate && (
+                <span style={{
+                  background: '#1a4a2e',
+                  border: '1px solid #2a7a4e',
+                  borderRadius: 4,
+                  color: '#4dde8a',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.05em',
+                  padding: '0.15rem 0.45rem',
+                  textTransform: 'uppercase',
+                }}>
+                  New Update
+                </span>
+              )}
+            </h3>
             <p style={{ color: '#888', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
               Order #{order.id} &middot; {(order.amountCents / 100).toFixed(2)} {String(order.currency || '').toUpperCase()}
             </p>

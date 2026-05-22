@@ -529,6 +529,16 @@ export default function App() {
       const dlToken = await issueDownloadToken(productId, session.token);
       window.location.href = `${apiBase}/shop/download-stream?token=${encodeURIComponent(dlToken)}`;
 
+      // Refresh orders shortly after so the "New Update" badge clears
+      setTimeout(async () => {
+        try {
+          const nextOrders = await getOrders(session.token);
+          setOrders(Array.isArray(nextOrders) ? nextOrders : []);
+        } catch (_) {
+          // non-critical — badge will clear on next page load
+        }
+      }, 3000);
+
       setStatus('Download started.');
     } catch (error) {
       if (error.message === 'purchase_required') {

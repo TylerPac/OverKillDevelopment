@@ -6,7 +6,9 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import dev.tylerpac.backend.model.DownloadToken;
+import dev.tylerpac.backend.model.User;
 
 public interface DownloadTokenRepository extends JpaRepository<DownloadToken, String> {
     Optional<DownloadToken> findByIdAndUsedFalseAndExpiresAtAfter(String id, Instant now);
+    Optional<DownloadToken> findTopByUserAndProductIdAndUsedTrueOrderByCreatedAtDesc(User user, String productId);
 }

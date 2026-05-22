@@ -61,6 +61,20 @@ export async function issueDownloadToken(productId, token) {
   return data.token;
 }
 
+export async function markProductRelease(productId, token) {
+  const response = await fetch(`${apiBase}/shop/admin/product-release/${encodeURIComponent(productId)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
 export async function downloadProductBlob(productId, token) {
   const response = await fetch(`${apiBase}/shop/download/${encodeURIComponent(productId)}`, {
     method: 'GET',

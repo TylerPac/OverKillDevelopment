@@ -1,6 +1,7 @@
 package dev.tylerpac.backend.controller;
 
 import java.security.Principal;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -41,7 +42,9 @@ import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
 import dev.tylerpac.backend.dto.SubscriptionStatusResponse;
+import dev.tylerpac.backend.model.ProductRelease;
 import dev.tylerpac.backend.model.User;
+import dev.tylerpac.backend.repo.ProductReleaseRepository;
 import dev.tylerpac.backend.repo.UserRepository;
 import dev.tylerpac.backend.service.ShopDownloadService;
 import dev.tylerpac.backend.service.StripeShopService;
@@ -56,17 +59,20 @@ public class ShopController {
     private final StripeShopService stripeShopService;
     private final ShopDownloadService shopDownloadService;
     private final UserRepository userRepository;
+    private final ProductReleaseRepository productReleaseRepository;
     private final Set<String> adminSteam64Ids;
 
     public ShopController(
         StripeShopService stripeShopService,
         ShopDownloadService shopDownloadService,
         UserRepository userRepository,
+        ProductReleaseRepository productReleaseRepository,
         @Value("${app.admin.steam64-ids:}") String adminSteam64IdsRaw
     ) {
         this.stripeShopService = stripeShopService;
         this.shopDownloadService = shopDownloadService;
         this.userRepository = userRepository;
+        this.productReleaseRepository = productReleaseRepository;
         this.adminSteam64Ids = Arrays.stream(adminSteam64IdsRaw.split(","))
             .map(String::trim)
             .filter(s -> !s.isEmpty())
@@ -477,6 +483,28 @@ public class ShopController {
                 case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
                 case "access_code_not_found" -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
                 case "access_code_not_revoked" -> ResponseEntity.badRequest().body(ex.getMessage());
+                default -> ResponseEntity.badRequest().body(ex.getMessage());
+            };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @PostMapping("/admin/product-release/{productId}")
+    public ResponseEntity<?> adminMarkProductRelease(@PathVariable String productId, Principal principal) {
+        try {
+            requireAdminUser(principal);
+            if (!StringUtils.hasText(productId)) {
+                return ResponseEntity.badRequest().body("product_id_required");
+            }
+            ProductRelease release = productReleaseRepository.findById(productId)
+                .orElseGet(() -> { ProductRelease r = new ProductRelease(); r.setProductId(productId); return r; });
+            release.setReleasedAt(Instant.now());
+            productReleaseRepository.save(release);
+            return ResponseEntity.ok(Map.of("productId", productId, "releasedAt", release.getReleasedAt().toString()));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
                 default -> ResponseEntity.badRequest().body(ex.getMessage());
             };
         }

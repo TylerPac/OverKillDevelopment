@@ -14,6 +14,7 @@ public class ShopOrderResponse {
     private String stripePaymentIntentId;
     private Instant createdAt;
     private Instant updatedAt;
+    private boolean hasUpdate;
 
     public ShopOrderResponse() {}
 
@@ -95,5 +96,13 @@ public class ShopOrderResponse {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public boolean isHasUpdate() {
+        return hasUpdate;
+    }
+
+    public void setHasUpdate(boolean hasUpdate) {
+        this.hasUpdate = hasUpdate;
     }
 }

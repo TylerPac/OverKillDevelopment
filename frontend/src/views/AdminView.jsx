@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { listAccessCodes, createFullUnlockCode, createSpecificCode, revokeCode, deleteCode } from '../services/adminService';
+import { markProductRelease } from '../services/apiClient';
 
 const AVAILABLE_PRODUCTS = ['keycard-crates', 'weapon-system', 'battle-pass'];
 
@@ -246,6 +247,72 @@ function CodeRow({ code, onRevoke, onDelete }) {
   );
 }
 
+function MarkProductReleaseForm({ token }) {
+  const [selectedProduct, setSelectedProduct] = useState(AVAILABLE_PRODUCTS[0]);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setResult(null);
+    setLoading(true);
+    try {
+      const data = await markProductRelease(selectedProduct, token);
+      setResult(`Marked "${selectedProduct}" as updated at ${new Date(data.releasedAt).toLocaleString()}`);
+    } catch (err) {
+      setError(err.message || 'Failed to mark release.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={cardStyle}>
+      <h3 style={{ margin: '0 0 1rem', color: '#c0cfff', fontSize: '1rem' }}>Mark New File Release</h3>
+      <p style={{ color: '#778', fontSize: '0.82rem', marginBottom: '1rem', marginTop: 0 }}>
+        When you upload a new version of a mod file, mark it here. Customers who
+        haven&apos;t downloaded since this point will see a &ldquo;New Update&rdquo; badge.
+      </p>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        {AVAILABLE_PRODUCTS.map((p) => (
+          <label
+            key={p}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              color: selectedProduct === p ? '#8cf' : '#889',
+              background: selectedProduct === p ? '#1c2a4a' : '#181a27',
+              border: `1px solid ${selectedProduct === p ? '#3a5cd8' : '#2a2d3e'}`,
+              borderRadius: 4,
+              padding: '0.3rem 0.7rem',
+            }}
+          >
+            <input
+              type="radio"
+              name="releaseProduct"
+              value={p}
+              checked={selectedProduct === p}
+              onChange={() => setSelectedProduct(p)}
+              style={{ display: 'none' }}
+            />
+            {p}
+          </label>
+        ))}
+      </div>
+      {error && <div style={{ color: '#f66', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{error}</div>}
+      {result && <div style={{ color: '#4dde8a', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{result}</div>}
+      <button type="submit" style={btnStyle('primary')} disabled={loading}>
+        {loading ? 'Saving…' : 'Mark as New Release'}
+      </button>
+    </form>
+  );
+}
+
 export default function AdminView({ token }) {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -299,6 +366,8 @@ export default function AdminView({ token }) {
       </h2>
 
       <CreateCodeForm token={token} onCreated={fetchCodes} />
+
+      <MarkProductReleaseForm token={token} />
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
