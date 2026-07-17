@@ -34,3 +34,4 @@ build/
 .env.development
 .env.production
 .env.local
+client_secret_*.json
