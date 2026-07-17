@@ -203,16 +203,24 @@ public class SheetsParsingService {
             String title = findBestTitleNear(rect, r, profileCol, 6, 8);
             if (title == null) continue;
 
-            // find min/max profiles in rows above
+            // find min/max profiles in rows above, preferring labels closest to profileCol
+            // (avoids cross-contamination in horizontal block layouts where multiple Min/Max
+            // labels appear in the same row across blocks)
             Integer minProfiles = null, maxProfiles = null;
+            int bestMinDist = Integer.MAX_VALUE, bestMaxDist = Integer.MAX_VALUE;
             for (int rr = Math.max(0, r - 8); rr < r; rr++) {
                 for (int cc = Math.max(0, profileCol - 10); cc < Math.min(rect.get(rr).size(), profileCol + 10); cc++) {
-                    String v = getCell(rect, rr, cc);
-                    String nh = normHeader(v);
-                    if (nh.equals("min") && minProfiles == null) minProfiles = toIntOrNull(getCell(rect, rr, cc + 1));
-                    if (nh.equals("max") && maxProfiles == null) maxProfiles = toIntOrNull(getCell(rect, rr, cc + 1));
+                    String nh = normHeader(getCell(rect, rr, cc));
+                    int dist = Math.abs(cc - profileCol);
+                    if (nh.equals("min") && dist < bestMinDist) {
+                        Integer v = toIntOrNull(getCell(rect, rr, cc + 1));
+                        if (v != null) { minProfiles = v; bestMinDist = dist; }
+                    }
+                    if (nh.equals("max") && dist < bestMaxDist) {
+                        Integer v = toIntOrNull(getCell(rect, rr, cc + 1));
+                        if (v != null) { maxProfiles = v; bestMaxDist = dist; }
+                    }
                 }
-                if (minProfiles != null && maxProfiles != null) break;
             }
             if (minProfiles == null) minProfiles = 1;
             if (maxProfiles == null) maxProfiles = 1;

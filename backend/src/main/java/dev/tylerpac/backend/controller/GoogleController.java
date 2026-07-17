@@ -3,9 +3,13 @@ package dev.tylerpac.backend.controller;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,10 +34,12 @@ import dev.tylerpac.backend.service.UserTokenService;
 import dev.tylerpac.backend.util.JsonUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import tools.jackson.databind.JsonNode;
-
+import tools.jackson.databind.ObjectMapper;
 @RestController
 @RequestMapping("/api/google")
 public class GoogleController {
+
+    private static final Logger logger = LoggerFactory.getLogger(GoogleController.class);
 
     private final UserRepository userRepository;
     private final UserTokenService userTokenService;
@@ -42,6 +48,7 @@ public class GoogleController {
     private final CryptoUtil cryptoUtil;
     private final SheetsParsingService sheetsParsingService;
     private final UserTemplateRepository userTemplateRepository;
+    private final ObjectMapper objectMapper;
     private final String frontendBaseUrl;
     private final dev.tylerpac.backend.security.JwtUtil jwtUtil;
 
@@ -53,6 +60,7 @@ public class GoogleController {
         CryptoUtil cryptoUtil,
         SheetsParsingService sheetsParsingService,
         UserTemplateRepository userTemplateRepository,
+        ObjectMapper objectMapper,
         JwtUtil jwtUtil,
         @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl
     ) {
@@ -63,6 +71,7 @@ public class GoogleController {
         this.cryptoUtil = cryptoUtil;
         this.sheetsParsingService = sheetsParsingService;
         this.userTemplateRepository = userTemplateRepository;
+        this.objectMapper = objectMapper;
         this.jwtUtil = jwtUtil;
         this.frontendBaseUrl = frontendBaseUrl;
     }
@@ -282,21 +291,27 @@ public class GoogleController {
         String templateId = System.getenv("GOOGLE_TEMPLATE_SPREADSHEET_ID");
         String name = body != null && body.containsKey("name") ? body.get("name") : "Loot Table - Copy";
         String tab = body != null && body.containsKey("tab") ? body.get("tab") : "Sheet1";
+        logger.info("[copy-template] Starting copy for user={} templateId={} name={}", user.getUsername(), templateId, name);
+        if (templateId == null || templateId.isBlank()) {
+            logger.error("[copy-template] GOOGLE_TEMPLATE_SPREADSHEET_ID env var is not set");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("template_id_not_configured");
+        }
         try {
             String newId = "";
             JsonNode createdMeta;
             boolean usedDriveCopy = false;
 
             // First, try Drive's files.copy which preserves formatting/formatting and other metadata.
-                try {
-                    JsonNode copyResp = googleOAuthService.copyFileAs(accessToken, templateId, name);
-                    String tmp = JsonUtils.textOrNull(copyResp.path("id"));
-                    newId = tmp == null ? "" : tmp;
-                    if (!newId.isEmpty()) {
-                        usedDriveCopy = true;
-                    }
-                } catch (Exception driveEx) {
-                // Drive copy failed, fall back to sheets.copyTo
+            try {
+                JsonNode copyResp = googleOAuthService.copyFileAs(accessToken, templateId, name);
+                String tmp = JsonUtils.textOrNull(copyResp.path("id"));
+                newId = tmp == null ? "" : tmp;
+                if (!newId.isEmpty()) {
+                    usedDriveCopy = true;
+                    logger.info("[copy-template] Drive copy succeeded: newId={}", newId);
+                }
+            } catch (Exception driveEx) {
+                logger.warn("[copy-template] Drive copy failed (will try sheets copy): {}", driveEx.getMessage());
             }
 
             // Second attempt: sheets.copyTo — copies each sheet WITH formatting using Sheets API
@@ -305,17 +320,25 @@ public class GoogleController {
                     createdMeta = googleOAuthService.copySpreadsheetWithFormatting(accessToken, templateId, name);
                     String tmp2 = JsonUtils.textOrNull(createdMeta.path("spreadsheetId"));
                     newId = tmp2 == null ? "" : tmp2;
-                    if (!newId.isEmpty()) usedDriveCopy = true;
+                    if (!newId.isEmpty()) {
+                        usedDriveCopy = true;
+                        logger.info("[copy-template] Sheets copy succeeded: newId={}", newId);
+                    }
                 } catch (Exception copyEx) {
-                    // sheets.copyTo failed, fall back to plain create+values
+                    logger.warn("[copy-template] Sheets copy failed (will try create from template): {}", copyEx.getMessage());
                 }
             }
 
             if (newId.isEmpty()) {
+                logger.info("[copy-template] Attempting createSpreadsheetFromTemplate");
                 createdMeta = googleOAuthService.createSpreadsheetFromTemplate(accessToken, templateId, name);
                 String tmp3 = JsonUtils.textOrNull(createdMeta.path("spreadsheetId"));
                 newId = tmp3 == null ? "" : tmp3;
-                if (newId.isEmpty()) return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
+                if (newId.isEmpty()) {
+                    logger.error("[copy-template] All 3 copy methods failed — returning create_failed");
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("create_failed");
+                }
+                logger.info("[copy-template] createSpreadsheetFromTemplate succeeded: newId={}", newId);
             }
 
             // Parse all 3 tabs exactly like the Python reference parser
@@ -347,6 +370,7 @@ public class GoogleController {
             ));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             String msg = ex.getMessage() == null ? "create_failed" : ex.getMessage();
+            logger.error("[copy-template] Unexpected exception: {}", msg, ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(msg);
         }
     }
@@ -391,6 +415,92 @@ public class GoogleController {
      * Fetch all 3 standard crate-settings tabs (LootTables, ItemProfiles, AttachmentProfiles)
      * from the given spreadsheet and parse them — exactly matching the Python reference parser.
      */
+    /**
+     * Syncs the LootMaster section of an uploaded CrateSettings JSON file into the
+     * user's linked Google Sheet. Writes to the LootTables, ItemProfiles, and
+     * AttachmentProfiles tabs in the block-layout format the import parsers expect.
+     */
+    @PostMapping("/sync-crate-settings")
+    public ResponseEntity<?> syncCrateSettings(
+        HttpServletRequest request,
+        @RequestBody Map<String, Object> body
+    ) {
+        User user = resolveCurrentUser(request);
+        if (user == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("unauthorized");
+
+        Object spreadsheetIdObj = body.get("spreadsheetId");
+        if (!(spreadsheetIdObj instanceof String sid) || sid.isBlank()) {
+            return ResponseEntity.badRequest().body("spreadsheetId_required");
+        }
+        String spreadsheetId = sid;
+
+        Object crateSettingsObj = body.get("crateSettings");
+        if (crateSettingsObj == null) {
+            return ResponseEntity.badRequest().body("crateSettings_required");
+        }
+
+        Optional<UserGoogleCredential> credOpt = userGoogleCredentialRepository.findByUser(user);
+        if (credOpt.isEmpty()) return ResponseEntity.badRequest().body("no_google_linked");
+
+        String appSecret = System.getenv("APP_SECRET");
+        if (appSecret == null) appSecret = "dev_insecure_secret";
+        String refreshToken = cryptoUtil.decrypt(appSecret, credOpt.get().getEncryptedRefreshToken());
+        String accessToken;
+        try {
+            accessToken = googleOAuthService.accessTokenFromRefreshToken(refreshToken);
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("google_auth_failed");
+        }
+
+        try {
+            JsonNode crateSettingsNode = objectMapper.convertValue(crateSettingsObj, JsonNode.class);
+
+            JsonNode lootMasterArr = crateSettingsNode.path("LootMaster");
+            if (!lootMasterArr.isArray() || lootMasterArr.isEmpty()) {
+                return ResponseEntity.badRequest().body("no_loot_master_found");
+            }
+            JsonNode lootMaster = lootMasterArr.get(0);
+
+            List<String> updated = new ArrayList<>();
+            List<String> failed  = new ArrayList<>();
+
+            try {
+                googleOAuthService.syncLootTablesPreservingFormat(
+                    accessToken, spreadsheetId,
+                    SheetsParsingService.TAB_LOOT_TABLES,
+                    lootMaster.path("LootTables"));
+                updated.add(SheetsParsingService.TAB_LOOT_TABLES);
+            } catch (Exception ex) {
+                failed.add(SheetsParsingService.TAB_LOOT_TABLES + ": " + ex.getMessage());
+            }
+
+            try {
+                googleOAuthService.syncColumnProfilesPreservingFormat(
+                    accessToken, spreadsheetId,
+                    SheetsParsingService.TAB_ITEM_PROFILES,
+                    lootMaster.path("ItemProfiles"), true);
+                updated.add(SheetsParsingService.TAB_ITEM_PROFILES);
+            } catch (Exception ex) {
+                failed.add(SheetsParsingService.TAB_ITEM_PROFILES + ": " + ex.getMessage());
+            }
+
+            try {
+                googleOAuthService.syncColumnProfilesPreservingFormat(
+                    accessToken, spreadsheetId,
+                    SheetsParsingService.TAB_ATTACHMENT_PROFILES,
+                    lootMaster.path("AttachmentProfiles"), false);
+                updated.add(SheetsParsingService.TAB_ATTACHMENT_PROFILES);
+            } catch (Exception ex) {
+                failed.add(SheetsParsingService.TAB_ATTACHMENT_PROFILES + ": " + ex.getMessage());
+            }
+
+            return ResponseEntity.ok(Map.of("updated", updated, "failed", failed));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("sync_failed: " + ex.getMessage());
+        }
+    }
+
     private Object fetchAndParseAllTabs(String accessToken, String spreadsheetId) {
         JsonNode lootRaw = fetchTabSafe(accessToken, spreadsheetId, SheetsParsingService.TAB_LOOT_TABLES);
         JsonNode itemRaw = fetchTabSafe(accessToken, spreadsheetId, SheetsParsingService.TAB_ITEM_PROFILES);

@@ -8,6 +8,13 @@ export default function GoogleSheetsImportView({ token, onClose }) {
   });
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, name }
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showCopyInput, setShowCopyInput] = useState(false);
+  const [copyName, setCopyName] = useState('My Loot Table');
+
+  // CrateSettings upload state
+  const [crateFile, setCrateFile]         = useState(null);
+  const [selectedSheetId, setSelectedSheetId] = useState('');
+  const [crateStatus, setCrateStatus]     = useState('');
 
   // Load server-side registered templates on mount
   useEffect(() => {
@@ -41,10 +48,9 @@ export default function GoogleSheetsImportView({ token, onClose }) {
     }
   }
 
-  async function copyTemplate() {
-    const name = window.prompt('Name your template copy:', 'My Loot Table');
-    if (name === null) return; // user cancelled
-    if (!name.trim()) { setStatus('Please enter a name.'); return; }
+  async function copyTemplate(name) {
+    if (!name || !name.trim()) { setStatus('Please enter a name.'); return; }
+    setShowCopyInput(false);
     try {
       setStatus('Copying template...');
       const res = await callJson('/api/google/copy-template', {
@@ -98,6 +104,36 @@ export default function GoogleSheetsImportView({ token, onClose }) {
     }
   }
 
+  async function syncCrateSettings() {
+    if (!crateFile || !selectedSheetId) {
+      setCrateStatus('Select a JSON file and a target sheet first.');
+      return;
+    }
+    setCrateStatus('Syncing…');
+    try {
+      const text = await crateFile.text();
+      let crateSettings;
+      try {
+        crateSettings = JSON.parse(text);
+      } catch (_) {
+        setCrateStatus('Invalid JSON — could not parse CrateSettings file.');
+        return;
+      }
+      const res = await callJson('/api/google/sync-crate-settings', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spreadsheetId: selectedSheetId, crateSettings }),
+      });
+      const updated = res?.updated ?? [];
+      const failed  = res?.failed  ?? [];
+      setCrateStatus(
+        `Updated: ${updated.join(', ') || 'none'}${failed.length ? ` | Failed: ${failed.join(', ')}` : ''}`
+      );
+    } catch (err) {
+      setCrateStatus('Sync failed: ' + String(err));
+    }
+  }
+
   async function executeDelete(id) {
     try {
       await callJson(`/api/google/templates?spreadsheetId=${encodeURIComponent(id)}`, {
@@ -130,11 +166,30 @@ export default function GoogleSheetsImportView({ token, onClose }) {
             {settingsOpen && (
               <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: '#1a1a2e', border: '1px solid #444', borderRadius: 6, padding: 8, zIndex: 10, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <button style={styles.btn} onClick={() => { setSettingsOpen(false); linkGoogle(); }}>Link Google Account</button>
-                <button style={{ ...styles.btn, background: '#2a4a7a' }} onClick={() => { setSettingsOpen(false); copyTemplate(); }}>Copy Template</button>
+                <button style={{ ...styles.btn, background: '#2a4a7a' }} onClick={() => { setSettingsOpen(false); setShowCopyInput(true); }}>Copy Template</button>
               </div>
             )}
           </div>
         </div>
+
+        {/* Copy Template inline input */}
+        {showCopyInput && (
+          <div style={{ background: '#1a2030', border: '1px solid #445', borderRadius: 6, padding: 10, marginBottom: 10 }}>
+            <label style={{ color: '#bbb', fontSize: 12, display: 'block', marginBottom: 6 }}>Name your template copy:</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                autoFocus
+                type="text"
+                value={copyName}
+                onChange={(e) => setCopyName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') copyTemplate(copyName); if (e.key === 'Escape') setShowCopyInput(false); }}
+                style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid #555', background: '#111', color: '#eee', fontSize: 13 }}
+              />
+              <button style={{ ...styles.btn, background: '#2a4a7a' }} onClick={() => copyTemplate(copyName)}>Copy</button>
+              <button style={styles.btn} onClick={() => setShowCopyInput(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         {/* Delete confirmation dialog */}
         {confirmDelete && (
@@ -179,7 +234,44 @@ export default function GoogleSheetsImportView({ token, onClose }) {
 
         {status && <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>{status}</div>}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* CrateSettings → Google Sheet sync */}
+        <section style={{ borderTop: '1px solid #333', paddingTop: 10, marginTop: 10 }}>
+          <label style={{ color: '#bbb', fontSize: 12, display: 'block', marginBottom: 6 }}>
+            Upload CrateSettings (sync LootMaster → Google Sheet)
+          </label>
+          <input
+            type="file"
+            accept=".json"
+            onChange={(e) => { setCrateFile(e.target.files?.[0] ?? null); setCrateStatus(''); }}
+            style={{ fontSize: 12, marginBottom: 6, width: '100%', color: '#eee' }}
+          />
+          {savedTemplates.length > 0 && (
+            <select
+              value={selectedSheetId}
+              onChange={(e) => setSelectedSheetId(e.target.value)}
+              style={{
+                background: '#2a2a3e', color: '#eee', border: '1px solid #444',
+                borderRadius: 4, padding: '3px 6px', fontSize: 12,
+                width: '100%', marginBottom: 6,
+              }}
+            >
+              <option value="" disabled>Select target sheet…</option>
+              {savedTemplates.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+          <button
+            style={{ ...styles.btn, background: '#1a5e3a', width: '100%' }}
+            onClick={syncCrateSettings}
+            disabled={!crateFile || !selectedSheetId}
+          >
+            Sync LootMaster to Sheet
+          </button>
+          {crateStatus && <div style={{ fontSize: 12, color: '#aaa', marginTop: 6 }}>{crateStatus}</div>}
+        </section>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
           <button style={styles.btn} onClick={onClose}>Close</button>
         </div>
       </div>

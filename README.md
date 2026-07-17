@@ -1,140 +1,95 @@
-# OverKillDevelopment
+<p align="center">
+	<img src="frontend/public/OverKill_Logobig.png" alt="OverKill Development logo" width="500" />
+</p>
+<p align="center"><strong>Mod shop, account linking, and secure download platform for OverKill products.</strong></p>
 
-This repository uses a local-first full stack workflow:
+## About OverKillDevelopment
+I built OverKillDevelopment to run my product ecosystem in one place: secure sign-in, paid access management, and controlled delivery of private mod downloads without relying on multiple disconnected services.
 
-- frontend runs locally with Vite + React
-- backend runs locally with Spring Boot
-- MySQL runs in Docker for development
+## Features
+- Steam OpenID authentication with JWT-based sessions
+- Account linking for Discord, GitHub, and Google
+- Stripe checkout and subscription flows with idempotency support
+- Purchase history, release gating, and access-code redemption
+- Secure one-time download token flow for protected files
+- Webhook safety with duplicate event protection and payment reconciliation
+- User-owned template integrations and sync support
+- Containerized local development with frontend/backend split
 
-## Environment Separation
+## Technology Stack
+- **Backend:** Spring Boot (REST) + JPA/Hibernate
+- **Frontend:** React + Vite
+- **Database:** MySQL
+- **Auth:** Steam OpenID + OAuth (Discord, GitHub, Google) + JWT
+- **Payments:** Stripe Checkout + Webhooks
+- **Build Tool:** Maven
+- **Containerization:** Docker, Docker Compose
+- **CI/CD:** Jenkins
 
-Frontend env files:
+## Architecture
 
-- frontend/.env.development
-- frontend/.env.production
+OverKillDevelopment is a container-friendly full-stack app with a React frontend, Spring Boot API, and MySQL persistence, built around authentication, product ownership, and secure digital delivery.
 
-Backend env files:
+### System Architecture
 
-- backend/.env.development
-- backend/.env.production
+```mermaid
+flowchart LR
+	U[User Browser]
 
-No shared root .env file is used by frontend/backend in development.
+	subgraph PROD[Production]
+		FE[Frontend Container\nNginx + React Build]
+		BE[Backend Container\nSpring Boot API + JWT]
+		DB[(MySQL)]
+		STRIPE[Stripe API]
+		STEAM[Steam OpenID]
+		OAUTH[Discord and GitHub and Google OAuth]
+		STORAGE[Protected Download Assets]
+	end
 
-## Frontend
+	U -->|HTTPS| FE
+	FE -->|/api| BE
+	BE -->|JPA/Hibernate| DB
+	BE -->|Checkout + Webhooks| STRIPE
+	BE -->|Sign-in| STEAM
+	BE -->|Account linking| OAUTH
+	BE -->|Tokenized access| STORAGE
 
-Only VITE_ prefixed env vars are supported by Vite.
+	subgraph DEV[Local Development]
+		VITE[Vite Dev Server :5173]
+		API[Spring Boot Dev :8080]
+		DEVDB[(MySQL in Docker)]
+	end
 
-Required key:
-
-```dotenv
-VITE_API_BASE_URL=http://localhost:8080
+	U -. hot reload .-> VITE
+	VITE -. /api proxy .-> API
+	API -. JDBC .-> DEVDB
 ```
 
-Frontend API calls use import.meta.env.VITE_API_BASE_URL.
+### Database Relationship Diagram
 
-## Backend Profiles
+```mermaid
+flowchart LR
+    subgraph LEFT[ ]
+        SHOP_ORDERS[SHOP_ORDERS\nFK: user_id]
+        DOWNLOAD_TOKENS[DOWNLOAD_TOKENS\nFK: user_id]
+        TIER_ZONE_MAPS[TIER_ZONE_MAPS\nFK: user_id]
+    end
 
-Database profiles:
+    USERS[USERS\nPK: id]
 
-- dev-mysql
-- prod
+    subgraph RIGHT[ ]
+        USER_TEMPLATES[USER_TEMPLATES\nFK: user_id]
+        USER_TOKENS[USER_TOKENS\nFK: user_id]
+        USER_GOOGLE_CREDENTIALS[USER_GOOGLE_CREDENTIALS\nFK: user_id]
+        SHOP_ACCESS_CODES[SHOP_ACCESS_CODES\nFK: redeemed_by_user_id]
+    end
 
-Optional local fallback profile:
+    SHOP_ORDERS -->|many-to-one| USERS
+    DOWNLOAD_TOKENS -->|many-to-one| USERS
+    TIER_ZONE_MAPS -->|many-to-one| USERS
 
-- dev-h2
-
-Profile config files:
-
-- backend/src/main/resources/application-dev-mysql.properties
-- backend/src/main/resources/application-prod.properties
-- backend/src/main/resources/application-dev-h2.properties
-
-Backend env keys:
-
-```dotenv
-DB_URL=jdbc:mysql://localhost:3306/tylerpac_dev
-DB_USERNAME=root
-DB_PASSWORD=password
-SPRING_PROFILES_ACTIVE=dev-mysql
-JWT_SECRET=replace_me_with_a_32_plus_char_secret
-STRIPE_SECRET_KEY=replace_me
+    USERS -->|one-to-many| USER_TEMPLATES
+    USERS -->|one-to-many| USER_TOKENS
+    USERS -->|one-to-one or one-to-many| USER_GOOGLE_CREDENTIALS
+    USERS -->|one-to-many| SHOP_ACCESS_CODES
 ```
-
-## Development Workflow
-
-1. Start MySQL (Docker)
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-2. Run backend
-
-```bash
-cd backend
-mvn spring-boot:run -Dspring-boot.run.profiles=dev-mysql
-```
-
-3. Run frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-## VS Code Tasks
-
-Tasks are available for:
-
-- Start MySQL (Docker)
-- Run Backend (dev-mysql)
-- Run Frontend
-- Run Development Environment (parallel)
-
-See .vscode/tasks.json.
-
-## CI/CD Compatibility
-
-This setup is ready for Docker-backed CI/CD:
-
-- deterministic MySQL service via docker-compose.dev.yml
-- explicit Spring profiles per environment
-- no mixed frontend/backend env loading
-
-## Optional helpers
-
-- backend/.env.example
-- frontend/.env.example
-- scripts/reset-dev-mysql-volume.bat
-
-## Security and reliability hardening
-
-The backend now includes:
-
-- Steam OpenID sign-in flow (`GET /auth/steam/login-url`, `GET /auth/steam/callback`)
-- Discord account linking flow (`GET /auth/discord/link-url`, `GET /auth/discord/callback`)
-- Access + refresh token strategy (`POST /auth/refresh` rotates refresh tokens)
-- Login protection with in-memory rate limiting and brute-force lockout
-- Stripe checkout idempotency support via `Idempotency-Key` header
-- Webhook duplicate-delivery safety via persisted processed event IDs
-- Payment failure handling (`payment_intent.payment_failed`, `charge.failed`) marking orders as `FAILED`
-- Scheduled reconciliation job for pending orders (`APP_SHOP_RECONCILE_INTERVAL_MS`)
-- Purchase event logging for pending/paid/failed states
-
-## Production secret management checklist
-
-Before public launch:
-
-1. Rotate all API credentials used during local testing.
-2. Set `APP_SECURITY_ALLOW_WEAK_JWT_SECRET=false` in production.
-3. Use a strong `JWT_SECRET` (32+ chars, random).
-4. Keep secrets only in environment/secret store (AWS Secrets Manager, Azure Key Vault, etc.).
-5. Do not commit `.env.development`/`.env.production` with real secrets.
-6. Configure Steam and Discord OAuth credentials in production environment variables.
-
-
-
-scp "E:\OVERKILLMODS\keycard-crates.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/keycard-crates.zip
-
-scp "E:\OVERKILLMODS\weapon-system.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/weapon-system.zip
-scp "E:\OVERKILLMODS\battle-pass.zip" ubuntu@15.204.118.134:/opt/overkill/downloads/battle-pass.zip

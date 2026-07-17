@@ -37,11 +37,11 @@ const DEFAULT_TOTAL_TIERS = 5;
 
 // ── Map presets ─────────────────────────────────────────────────────────────
 const MAP_PRESETS = [
-  { label: 'Chernarus (15360m)',   worldSize: 15360 },
-  { label: 'Livonia (7360m)',      worldSize: 7360  },
-  { label: 'Namalsk (7360m)',      worldSize: 7360  },
-  { label: 'Sakhal (12800m)',      worldSize: 12800 },
-  { label: 'Custom…',             worldSize: null  },
+  { label: 'Chernarus', worldSize: 15360 },
+  { label: 'Livonia',   worldSize: 7360  },
+  { label: 'Namalsk',   worldSize: 7360  },
+  { label: 'Sakhal',    worldSize: 12800 },
+  { label: 'Custom…',  worldSize: null  },
 ];
 
 export default function TierPainterView({ token, onBack }) {
@@ -120,15 +120,35 @@ export default function TierPainterView({ token, onBack }) {
   const [totalTiers,   setTotalTiers]   = useState(DEFAULT_TOTAL_TIERS);
   const [worldSize,    setWorldSize]    = useState(DEFAULT_WORLD_SIZE);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('Chernarus');
 
   // Map slot management
   const [savedMaps,    setSavedMaps]    = useState([]);
   const [activeMap,    setActiveMap]    = useState('');
-  const [newMapName,   setNewMapName]   = useState('');
+  const [profileName,  setProfileName]  = useState('');   // profile name within the selected preset
+  const [newMapName,   setNewMapName]   = useState('');   // free-text name when no preset is selected
   const [mapStatus,    setMapStatus]    = useState('');
   const [mapLoading,   setMapLoading]   = useState(false);
   const pendingPolygonsRef = useRef(null);
+
+  // Whether a built-in (non-custom) preset is active
+  const isUsingPreset = selectedPreset && selectedPreset !== 'Custom…';
+
+  // The key that will be stored/saved for the current map
+  const nameToBeSaved = isUsingPreset
+    ? (profileName.trim() ? `${selectedPreset}::${profileName.trim()}` : '')
+    : (activeMap || newMapName).trim();
+
+  // Only show maps that belong to the active preset (when one is selected)
+  const filteredMaps = isUsingPreset
+    ? savedMaps.filter((m) => m.mapName.startsWith(selectedPreset + '::'))
+    : savedMaps;
+
+  // Strip the preset prefix for display in the list
+  function displayMapName(fullName) {
+    const sep = fullName.indexOf('::');
+    return sep >= 0 ? fullName.substring(sep + 2) : fullName;
+  }
 
   // Refs so keyboard handlers always have fresh values
   const tierIdxRef     = useRef(tierIdx);
@@ -464,11 +484,12 @@ export default function TierPainterView({ token, onBack }) {
 
   // ── Map slot operations ───────────────────────────────────────────────────
   async function fetchMapList() {
+    if (!token) return;
     try {
       const maps = await listTierZoneMaps(token);
       setSavedMaps(maps);
-    } catch {
-      // Non-critical — just leave list empty
+    } catch (err) {
+      setMapStatus(`Could not load saved maps: ${err.message}`);
     }
   }
 
@@ -477,8 +498,7 @@ export default function TierPainterView({ token, onBack }) {
   }, [token]);
 
   async function handleSave() {
-    const name = (activeMap || newMapName).trim();
-    if (!name) { setMapStatus('Enter a map name first.'); return; }
+    if (!nameToBeSaved) { setMapStatus('Enter a profile name first.'); return; }
     if (!modelRef.current) return;
 
     setMapLoading(true);
@@ -490,10 +510,10 @@ export default function TierPainterView({ token, onBack }) {
         polygons: modelRef.current.buildExportPolygons(),
       };
       const polygonsJson = JSON.stringify(payload);
-      await saveTierZoneMap(token, name, polygonsJson);
-      setActiveMap(name);
+      await saveTierZoneMap(token, nameToBeSaved, polygonsJson);
+      setActiveMap(nameToBeSaved);
       setNewMapName('');
-      setMapStatus(`Saved "${name}".`);
+      setMapStatus(`Saved "${nameToBeSaved}".`);
       await fetchMapList();
     } catch (err) {
       setMapStatus(`Save failed: ${err.message}`);
@@ -537,6 +557,24 @@ export default function TierPainterView({ token, onBack }) {
         setActiveMap(mapName);
       } else {
         throw new Error('Invalid map format');
+      }
+
+      // Restore preset + profile name from the stored key (e.g. "Chernarus (15360m)::MyProfile")
+      const sepIdx = mapName.indexOf('::');
+      if (sepIdx >= 0) {
+        const presetLabel = mapName.substring(0, sepIdx);
+        const profilePart = mapName.substring(sepIdx + 2);
+        const matchingPreset = MAP_PRESETS.find((p) => p.label === presetLabel);
+        if (matchingPreset) {
+          setSelectedPreset(matchingPreset.label);
+          if (matchingPreset.worldSize !== null) setWorldSize(matchingPreset.worldSize);
+          loadBgImage(matchingPreset.label.split(' ')[0]); // e.g. "Chernarus"
+        }
+        setProfileName(profilePart);
+        setNewMapName('');
+      } else {
+        setProfileName('');
+        setNewMapName('');
       }
     } catch (err) {
       setMapStatus(`Load failed: ${err.message}`);
@@ -611,6 +649,8 @@ export default function TierPainterView({ token, onBack }) {
     const preset = MAP_PRESETS.find((p) => p.label === e.target.value);
     if (!preset) return;
     setSelectedPreset(preset.label);
+    setProfileName('');
+    setActiveMap('');
     if (preset.worldSize !== null) {
       // apply preset world size (hide size input for builtin maps)
       setWorldSize(preset.worldSize);
@@ -622,8 +662,6 @@ export default function TierPainterView({ token, onBack }) {
       loadBgImage(null);
     }
   }
-
-  const nameToBeSaved = (activeMap || newMapName).trim();
 
   return (
     <div style={styles.root}>
@@ -716,15 +754,23 @@ export default function TierPainterView({ token, onBack }) {
         {/* Map slots */}
         <section style={styles.section}>
           <label style={styles.label}>Map Slots</label>
-          {savedMaps.length > 0 && (
+          {isUsingPreset && savedMaps.some((m) => !m.mapName.startsWith(selectedPreset + '::')) && (
+            <button
+              onClick={() => setSelectedPreset('')}
+              style={{ ...styles.microBtn, marginBottom: 4, color: '#aaa', fontSize: 11 }}
+            >
+              Show All Maps
+            </button>
+          )}
+          {filteredMaps.length > 0 && (
             <ul style={styles.mapList}>
-              {savedMaps.map((m) => (
+              {filteredMaps.map((m) => (
                 <li key={m.mapName} style={styles.mapItem}>
                   <span
                     style={{ ...styles.mapName, fontWeight: activeMap === m.mapName ? 700 : 400 }}
                     title={`Updated: ${m.updatedAt}`}
                   >
-                    {m.mapName}
+                    {displayMapName(m.mapName)}
                   </span>
                   <button onClick={() => handleLoad(m.mapName)}   style={styles.microBtn} disabled={mapLoading}>Load</button>
                   <button onClick={() => handleDelete(m.mapName)} style={{ ...styles.microBtn, color: '#f88' }} disabled={mapLoading}>Del</button>
@@ -732,14 +778,25 @@ export default function TierPainterView({ token, onBack }) {
               ))}
             </ul>
           )}
-          <input
-            type="text"
-            placeholder={activeMap || 'New map name…'}
-            value={newMapName}
-            onChange={(e) => setNewMapName(e.target.value)}
-            style={styles.input}
-            maxLength={100}
-          />
+          {isUsingPreset ? (
+            <input
+              type="text"
+              placeholder="Profile name (e.g. Default)…"
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              style={styles.input}
+              maxLength={80}
+            />
+          ) : (
+            <input
+              type="text"
+              placeholder={activeMap || 'New map name…'}
+              value={newMapName}
+              onChange={(e) => setNewMapName(e.target.value)}
+              style={styles.input}
+              maxLength={100}
+            />
+          )}
           <button onClick={handleSave}     style={{ ...styles.btn, marginTop: 4 }} disabled={mapLoading || !nameToBeSaved}>
             {mapLoading ? 'Saving…' : `Save${nameToBeSaved ? ` "${nameToBeSaved}"` : ''}`}
           </button>

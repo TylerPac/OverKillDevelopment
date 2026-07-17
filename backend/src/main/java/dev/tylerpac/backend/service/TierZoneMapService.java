@@ -82,7 +82,7 @@ public class TierZoneMapService {
         if (trimmed.length() > MAX_MAP_NAME_LENGTH) {
             throw new IllegalArgumentException("map_name_too_long");
         }
-        if (!trimmed.matches("[\\w\\-. ]+")) {
+        if (!trimmed.matches("[\\w\\-. ():\\[\\]]+")) {
             throw new IllegalArgumentException("map_name_invalid_characters");
         }
         return trimmed;

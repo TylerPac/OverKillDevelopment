@@ -9,9 +9,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +63,7 @@ public class GoogleOAuthService {
         q.put("redirect_uri", redirectUri);
         q.put("response_type", "code");
         // Use least-privilege Drive scope: access to files created or opened by the app
-        q.put("scope", "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file");
+        q.put("scope", "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive");
         q.put("access_type", "offline");
         q.put("include_granted_scopes", "true");
         q.put("state", state);
@@ -569,6 +571,522 @@ public class GoogleOAuthService {
             rows.add(row);
         }
         return rows;
+    }
+
+    // ── Position-aware tab sync (preserves cell formatting) ────────────────────
+
+    /** Reads the current values of a sheet tab into a mutable 2-D string list. */
+    private List<List<String>> getTabValuesList(String accessToken, String spreadsheetId, String tabName) throws IOException, InterruptedException {
+        String url = "https://sheets.googleapis.com/v4/spreadsheets/"
+            + urlEncode(spreadsheetId) + "/values/" + urlEncode(tabName);
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(20))
+            .header("Authorization", "Bearer " + accessToken)
+            .GET()
+            .build();
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) return new ArrayList<>();
+        JsonNode root = objectMapper.readTree(resp.body());
+        List<List<String>> rows = new ArrayList<>();
+        JsonNode valNode = root.path("values");
+        if (valNode.isArray()) {
+            for (JsonNode rowNode : valNode) {
+                List<String> row = new ArrayList<>();
+                if (rowNode.isArray()) {
+                    for (JsonNode cell : rowNode) row.add(JsonUtils.textOrEmpty(cell));
+                }
+                rows.add(row);
+            }
+        }
+        return rows;
+    }
+
+    /** Converts a 0-based column index to a spreadsheet column letter (A, B, … Z, AA, …). */
+    private String colToLetter(int col) {
+        StringBuilder sb = new StringBuilder();
+        col++;
+        while (col > 0) {
+            int rem = (col - 1) % 26;
+            sb.insert(0, (char) ('A' + rem));
+            col = (col - 1) / 26;
+        }
+        return sb.toString();
+    }
+
+    private String normHdr(String s) {
+        if (s == null) return "";
+        return s.trim().toLowerCase().replaceAll("[^a-z0-9]+", "");
+    }
+
+    private String getCellSafe(List<List<String>> rows, int r, int c) {
+        if (r < 0 || r >= rows.size()) return "";
+        List<String> row = rows.get(r);
+        if (row == null || c < 0 || c >= row.size()) return "";
+        String v = row.get(c);
+        return v == null ? "" : v;
+    }
+
+    /** Executes a Sheets values.batchUpdate call with multiple range-value pairs. */
+    private void batchUpdateValues(String accessToken, String spreadsheetId,
+                                   List<Map<String, Object>> data) throws IOException, InterruptedException {
+        if (data.isEmpty()) return;
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("valueInputOption", "USER_ENTERED");
+        body.set("data", objectMapper.valueToTree(data));
+        String url = "https://sheets.googleapis.com/v4/spreadsheets/"
+            + urlEncode(spreadsheetId) + "/values:batchUpdate";
+        HttpRequest req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(30))
+            .header("Authorization", "Bearer " + accessToken)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build();
+        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new IllegalArgumentException("batchUpdate_failed: status=" + resp.statusCode()
+                + " body=" + resp.body());
+        }
+    }
+
+    private void addSingleCell(List<Map<String, Object>> batch, String tabName,
+                               int col, int row0Based, String value) {
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("range", tabName + "!" + colToLetter(col) + (row0Based + 1));
+        d.put("majorDimension", "ROWS");
+        d.put("values", List.of(List.of(value)));
+        batch.add(d);
+    }
+
+    private String fmtDouble(double v) {
+        if (v == Math.floor(v) && !Double.isInfinite(v)) return String.valueOf((long) v);
+        return String.valueOf(v);
+    }
+
+    /**
+     * Syncs LootTables data to the sheet while preserving cell formatting.
+     * Discovers block anchor positions ("Profile" header cells), then writes incoming
+     * tables positionally (1st incoming → 1st block, etc.) regardless of name match.
+     * Also writes the table name and min/max spawned values into their respective cells.
+     * No values.clear is performed — formatting (merged cells, colors, fonts) is untouched.
+     */
+    public void syncLootTablesPreservingFormat(String accessToken, String spreadsheetId,
+                                               String tabName, JsonNode incomingTables) {
+        try {
+            List<List<String>> current = getTabValuesList(accessToken, spreadsheetId, tabName);
+            if (current.isEmpty()) return;
+
+            int maxCols = 0;
+            for (List<String> r : current) if (r.size() > maxCols) maxCols = r.size();
+            for (List<String> r : current) { while (r.size() < maxCols) r.add(""); }
+
+            List<JsonNode> incoming = new ArrayList<>();
+            if (incomingTables.isArray()) {
+                for (JsonNode t : incomingTables) incoming.add(t);
+            }
+            logger.info("[sync-loot] tab='{}' currentRows={} incomingTables={}",
+                tabName, current.size(), incoming.size());
+            if (incoming.isEmpty()) return;
+
+            // Detect loot table block start columns from row 0 (table name row).
+            // The template layout is:
+            //   row 0: <TableName>  (at startCol, e.g. col 1, 7, 13, ...)
+            //   row 1: "Min" <minSpawnedValue>  (at startCol, startCol+1)
+            //   row 2: "Max" <maxSpawnedValue>  (at startCol, startCol+1)
+            //   row 3: "" "Min" "Max" "Chance"  (column headers for data)
+            //   row 4: "Profile"                (profile label)
+            //   row 5+: data rows
+            // Row 0 non-empty cells that aren't structural headers = block start columns.
+            Set<String> knownHdrs = Set.of(
+                "profile", "min", "max", "chance", "tospawn", "percenttospawn",
+                "minspawned", "maxspawned", "loot", "loottable"
+            );
+            List<Integer> blockStarts = new ArrayList<>();
+            List<String> row0 = current.get(0);
+            for (int c = 0; c < row0.size(); c++) {
+                String val = row0.get(c).trim();
+                if (val.isEmpty() || knownHdrs.contains(normHdr(val))) continue;
+                blockStarts.add(c);
+            }
+            logger.info("[sync-loot] tab='{}' blocks found={} row0Names={}",
+                tabName, blockStarts.size(),
+                blockStarts.stream().map(c -> c + ":" + row0.get(c)).toList());
+
+            if (blockStarts.isEmpty()) {
+                logger.warn("[sync-loot] tab='{}' no table name blocks found in row 0", tabName);
+                return;
+            }
+
+            List<Map<String, Object>> batchData = new ArrayList<>();
+            int tableCount = Math.min(incoming.size(), blockStarts.size());
+
+            for (int bi = 0; bi < blockStarts.size(); bi++) {
+                int startCol = blockStarts.get(bi);
+
+                if (bi >= tableCount) {
+                    // Extra template block with no incoming table: clear table name cell
+                    addSingleCell(batchData, tabName, startCol, 0, "");
+                    continue;
+                }
+
+                JsonNode tableNode = incoming.get(bi);
+                String tableName  = JsonUtils.textOrEmpty(tableNode.path("TableName")).trim();
+                int minSpawned    = tableNode.path("MinProfileSpawned").asInt(1);
+                int maxSpawned    = tableNode.path("MaxProfileSpawned").asInt(1);
+
+                // Find the "Profile" anchor row by scanning down startCol (rows 1-14)
+                int profileHdrRow = -1;
+                for (int r = 1; r < Math.min(current.size(), 15); r++) {
+                    if (normHdr(getCellSafe(current, r, startCol)).equals("profile")) {
+                        profileHdrRow = r;
+                        break;
+                    }
+                }
+                if (profileHdrRow == -1) {
+                    logger.warn("[sync-loot] tab='{}' block[{}] startCol={} — no 'Profile' header found, skipping",
+                        tabName, bi, startCol);
+                    continue;
+                }
+                int dataStartRow = profileHdrRow + 1;
+
+                logger.info("[sync-loot] tab='{}' block[{}] tableName='{}' startCol={} profileHdrRow={} dataStartRow={}",
+                    tabName, bi, tableName, startCol, profileHdrRow, dataStartRow);
+
+                // Write table name to row 0
+                if (!tableName.isEmpty()) {
+                    addSingleCell(batchData, tabName, startCol, 0, tableName);
+                }
+
+                // Write MinProfileSpawned / MaxProfileSpawned:
+                // scan rows 1..profileHdrRow-1 at startCol for "Min"/"Max" label cells
+                for (int r = 1; r < profileHdrRow; r++) {
+                    String nh = normHdr(getCellSafe(current, r, startCol));
+                    if (nh.equals("min")) {
+                        addSingleCell(batchData, tabName, startCol + 1, r, String.valueOf(minSpawned));
+                    } else if (nh.equals("max")) {
+                        addSingleCell(batchData, tabName, startCol + 1, r, String.valueOf(maxSpawned));
+                    }
+                }
+
+                // Determine Min/Max/Chance column offsets from the column-header row
+                // (exactly the row just above the "Profile" anchor row).
+                // Limit scan to off < 6 to avoid picking up the next block's headers.
+                int minOff = 1, maxOff = 2, chanceOff = 3;
+                if (profileHdrRow > 0) {
+                    for (int off = 1; off < 6; off++) {
+                        String nh = normHdr(getCellSafe(current, profileHdrRow - 1, startCol + off));
+                        if (nh.equals("min"))    minOff    = off;
+                        if (nh.equals("max"))    maxOff    = off;
+                        if (nh.equals("chance")) chanceOff = off;
+                    }
+                }
+                int rowWidth = chanceOff + 1;
+
+                // Calculate rows to overwrite / clear
+                int lastDataRow = dataStartRow;
+                for (int rr = dataStartRow; rr < Math.min(current.size(), dataStartRow + 200); rr++) {
+                    if (!getCellSafe(current, rr, startCol).trim().isEmpty()) {
+                        lastDataRow = rr;
+                    } else if (rr > dataStartRow + 5 && lastDataRow < rr - 5) {
+                        break;
+                    }
+                }
+                JsonNode lootTable = tableNode.path("LootTable");
+                int newCount   = lootTable.isArray() ? lootTable.size() : 0;
+                int clearCount = Math.max(newCount + 3, lastDataRow - dataStartRow + 2);
+
+                List<List<Object>> dataRows = new ArrayList<>();
+                if (lootTable.isArray()) {
+                    for (JsonNode entry : lootTable) {
+                        List<Object> row = new ArrayList<>(Collections.nCopies(rowWidth, ""));
+                        row.set(0,         JsonUtils.textOrEmpty(entry.path("Profile")));
+                        row.set(minOff,    fmtDouble(entry.path("MinSpawn").asDouble(1)));
+                        row.set(maxOff,    fmtDouble(entry.path("MaxLoot").asDouble(1)));
+                        row.set(chanceOff, fmtDouble(entry.path("PercentToSpawn").asDouble(1.0)));
+                        dataRows.add(row);
+                    }
+                }
+                while (dataRows.size() < clearCount) {
+                    dataRows.add(new ArrayList<>(Collections.nCopies(rowWidth, "")));
+                }
+
+                Map<String, Object> rangeData = new LinkedHashMap<>();
+                rangeData.put("range", tabName + "!" + colToLetter(startCol) + (dataStartRow + 1)
+                    + ":" + colToLetter(startCol + rowWidth - 1) + (dataStartRow + clearCount));
+                rangeData.put("majorDimension", "ROWS");
+                rangeData.put("values", dataRows);
+                batchData.add(rangeData);
+            }
+
+            if (!batchData.isEmpty()) {
+                logger.info("[sync-loot] tab='{}' batchUpdate ranges={}", tabName, batchData.size());
+                batchUpdateValues(accessToken, spreadsheetId, batchData);
+            } else {
+                logger.warn("[sync-loot] tab='{}' batchData is empty — no blocks found in sheet", tabName);
+            }
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("sync_loot_tables_failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Syncs ItemProfiles or AttachmentProfiles data while preserving cell formatting.
+     * Discovers profile block positions from row 0 positionally (1st incoming → 1st block, etc.),
+     * finds the "ItemName" / "AttachName" header row dynamically in each block column,
+     * and writes item data at fixed column offsets matching the parser's layout.
+     * Also writes incoming profile names into row 0.
+     *
+     * @param isItemProfiles {@code true} for ItemProfiles (includes Slot sub-rows),
+     *                       {@code false} for AttachmentProfiles
+     */
+    public void syncColumnProfilesPreservingFormat(String accessToken, String spreadsheetId,
+                                                   String tabName, JsonNode incomingProfiles,
+                                                   boolean isItemProfiles) {
+        try {
+            List<List<String>> current = getTabValuesList(accessToken, spreadsheetId, tabName);
+            if (current.isEmpty()) return;
+
+            int maxCols = 0;
+            for (List<String> r : current) if (r.size() > maxCols) maxCols = r.size();
+            for (List<String> r : current) { while (r.size() < maxCols) r.add(""); }
+
+            // Build ordered list of incoming profiles
+            List<JsonNode> incoming = new ArrayList<>();
+            if (incomingProfiles.isArray()) {
+                for (JsonNode p : incomingProfiles) incoming.add(p);
+            }
+            logger.info("[sync-profiles] tab='{}' currentRows={} incomingProfiles={}",
+                tabName, current.size(), incoming.size());
+            if (incoming.isEmpty()) return;
+
+            // Structural headers — cells in row 0 matching these are column headers, not profile names
+            Set<String> knownHdrs = Set.of(
+                "itemname", "item", "attachname", "spawnprob", "spawnpro",
+                "quantitymin", "quantitymax", "quantmin", "quantmax",
+                "healthmin", "healthmax", "profile", "attachprob",
+                "attachquantitymin", "attachquantitymax", "attachhealthmin", "attachhealthmax",
+                "min", "max", "chance"
+            );
+
+            // Find profile block start columns from row 0 (non-structural, non-empty cells)
+            List<Integer> blockStarts = new ArrayList<>();
+            List<String> row0 = current.get(0);
+            for (int c = 0; c < row0.size(); c++) {
+                String val = row0.get(c).trim();
+                if (val.isEmpty() || knownHdrs.contains(normHdr(val))) continue;
+                blockStarts.add(c);
+            }
+            int fixedWidth = isItemProfiles ? 8 : 6;
+            logger.info("[sync-profiles] tab='{}' blockStarts={} sheetRow0Names={}",
+                tabName, blockStarts.size(),
+                blockStarts.stream().map(c -> c + ":" + row0.get(c)).toList());
+            if (blockStarts.isEmpty()) return;
+
+            List<Map<String, Object>> batchData = new ArrayList<>();
+            int profileCount = Math.min(incoming.size(), blockStarts.size());
+
+            for (int bi = 0; bi < profileCount; bi++) {
+                int startCol = blockStarts.get(bi);
+                JsonNode profileNode = incoming.get(bi);
+                String incomingName = JsonUtils.textOrEmpty(profileNode.path("Profile")).trim();
+
+                // Write profile name into row 0 (preserves format, updates value only)
+                if (!incomingName.isEmpty()) {
+                    addSingleCell(batchData, tabName, startCol, 0, incomingName);
+                }
+
+                // Find the "itemname" / "attachname" header row by scanning down this column
+                int itemHdrRow = -1;
+                for (int r = 1; r < Math.min(current.size(), 15); r++) {
+                    String nh = normHdr(getCellSafe(current, r, startCol));
+                    if (nh.equals("itemname") || nh.equals("item") || nh.equals("attachname")) {
+                        itemHdrRow = r;
+                        break;
+                    }
+                }
+                if (itemHdrRow == -1) {
+                    logger.warn("[sync-profiles] tab='{}' block[{}] col={} — no itemname header found, skipping",
+                        tabName, bi, startCol);
+                    continue;
+                }
+                int dataStartRow = itemHdrRow + 1; // 0-indexed; sheet row = dataStartRow + 1
+
+                logger.info("[sync-profiles] tab='{}' block[{}] name='{}' startCol={} itemHdrRow={} dataStartRow={}",
+                    tabName, bi, incomingName, startCol, itemHdrRow, dataStartRow);
+
+                // Calculate rows to overwrite
+                int lastDataRow = dataStartRow;
+                for (int rr = dataStartRow; rr < Math.min(current.size(), dataStartRow + 200); rr++) {
+                    if (!getCellSafe(current, rr, startCol).trim().isEmpty()) {
+                        lastDataRow = rr;
+                    } else if (rr > dataStartRow + 3 && lastDataRow < rr - 5) {
+                        break;
+                    }
+                }
+                JsonNode items = profileNode.path("Items");
+                int newCount = items.isArray() ? items.size() : 0;
+                int clearCount = Math.max(newCount + 3, lastDataRow - dataStartRow + 2);
+
+                // Build data rows using FIXED column offsets matching the parser's layout:
+                // ItemProfiles:   col 0=ItemName, 1=SpawnProb, 2=QtyMin, 3=QtyMax, 4=HltMin, 5=HltMax, 6=SlotProfile, 7=SlotProb
+                // AttachProfiles: col 0=AttachName, 1=AttachProb, 2=QtyMin, 3=QtyMax, 4=HltMin, 5=HltMax
+                List<List<Object>> dataRows = new ArrayList<>();
+                if (items.isArray()) {
+                    for (JsonNode item : items) {
+                        List<Object> row = new ArrayList<>(Collections.nCopies(fixedWidth, ""));
+                        if (isItemProfiles) {
+                            row.set(0, JsonUtils.textOrEmpty(item.path("ItemName")));
+                            row.set(1, fmtDouble(item.path("SpawnProb").asDouble(0)));
+                            row.set(2, fmtDouble(item.path("ItemQuantityMin").asDouble(0)));
+                            row.set(3, fmtDouble(item.path("ItemQuantityMax").asDouble(0)));
+                            row.set(4, fmtDouble(item.path("ItemHealthMin").asDouble(0)));
+                            row.set(5, fmtDouble(item.path("ItemHealthMax").asDouble(0)));
+                            JsonNode slots = item.path("Slots");
+                            if (slots.isArray() && !slots.isEmpty()) {
+                                row.set(6, JsonUtils.textOrEmpty(slots.get(0).path("Profile")));
+                                row.set(7, fmtDouble(slots.get(0).path("SpawnProb").asDouble(0)));
+                            }
+                            dataRows.add(row);
+                            if (slots.isArray()) {
+                                for (int si = 1; si < slots.size(); si++) {
+                                    List<Object> slotRow = new ArrayList<>(Collections.nCopies(fixedWidth, ""));
+                                    slotRow.set(6, JsonUtils.textOrEmpty(slots.get(si).path("Profile")));
+                                    slotRow.set(7, fmtDouble(slots.get(si).path("SpawnProb").asDouble(0)));
+                                    dataRows.add(slotRow);
+                                }
+                            }
+                        } else {
+                            row.set(0, JsonUtils.textOrEmpty(item.path("AttachName")));
+                            row.set(1, fmtDouble(item.path("AttachProb").asDouble(0)));
+                            row.set(2, fmtDouble(item.path("AttachQuantityMin").asDouble(0)));
+                            row.set(3, fmtDouble(item.path("AttachQuantityMax").asDouble(0)));
+                            row.set(4, fmtDouble(item.path("AttachHealthMin").asDouble(0)));
+                            row.set(5, fmtDouble(item.path("AttachHealthMax").asDouble(0)));
+                            dataRows.add(row);
+                        }
+                    }
+                }
+                while (dataRows.size() < clearCount) {
+                    dataRows.add(new ArrayList<>(Collections.nCopies(fixedWidth, "")));
+                }
+
+                // dataStartRow is 0-indexed; sheet notation = dataStartRow + 1
+                Map<String, Object> rangeData = new LinkedHashMap<>();
+                rangeData.put("range", tabName + "!"
+                    + colToLetter(startCol) + (dataStartRow + 1)
+                    + ":" + colToLetter(startCol + fixedWidth - 1) + (dataStartRow + clearCount));
+                rangeData.put("majorDimension", "ROWS");
+                rangeData.put("values", dataRows);
+                batchData.add(rangeData);
+            }
+
+            // Clear extra template blocks that have no incoming profile
+            for (int bi = profileCount; bi < blockStarts.size(); bi++) {
+                int startCol = blockStarts.get(bi);
+                addSingleCell(batchData, tabName, startCol, 0, "");
+                // Find and clear any existing data rows in this extra block
+                int extraHdrRow = -1;
+                for (int r = 1; r < Math.min(current.size(), 15); r++) {
+                    String nh = normHdr(getCellSafe(current, r, startCol));
+                    if (nh.equals("itemname") || nh.equals("item") || nh.equals("attachname")) {
+                        extraHdrRow = r;
+                        break;
+                    }
+                }
+                if (extraHdrRow != -1) {
+                    int dataStart = extraHdrRow + 1;
+                    int lastRow = dataStart;
+                    for (int rr = dataStart; rr < Math.min(current.size(), dataStart + 100); rr++) {
+                        if (!getCellSafe(current, rr, startCol).trim().isEmpty()) lastRow = rr;
+                        else if (rr > dataStart + 3 && lastRow < rr - 5) break;
+                    }
+                    int clearRows = lastRow - dataStart + 1;
+                    List<List<Object>> emptyRows = new ArrayList<>();
+                    for (int i = 0; i < clearRows; i++) {
+                        emptyRows.add(new ArrayList<>(Collections.nCopies(fixedWidth, "")));
+                    }
+                    Map<String, Object> clearRange = new LinkedHashMap<>();
+                    clearRange.put("range", tabName + "!"
+                        + colToLetter(startCol) + (dataStart + 1)
+                        + ":" + colToLetter(startCol + fixedWidth - 1) + (dataStart + clearRows));
+                    clearRange.put("majorDimension", "ROWS");
+                    clearRange.put("values", emptyRows);
+                    batchData.add(clearRange);
+                }
+            }
+
+            if (!batchData.isEmpty()) {
+                logger.info("[sync-profiles] tab='{}' batchUpdate ranges={}", tabName, batchData.size());
+                batchUpdateValues(accessToken, spreadsheetId, batchData);
+            } else {
+                logger.warn("[sync-profiles] tab='{}' batchData is empty", tabName);
+            }
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("sync_profiles_failed: " + tabName + ": " + e.getMessage(), e);
+        }
+    }
+
+    // ── Legacy: clear-and-rewrite (used for first-time setup when no template exists) ──
+
+    /**
+     * Clears the content of a sheet tab and then writes new row data to it.
+     *
+     * @param accessToken   valid Google OAuth access token
+     * @param spreadsheetId target spreadsheet
+     * @param tabName       name of the sheet tab (e.g. "LootTables")
+     * @param rows          ArrayNode of row arrays to write; may be empty (will only clear)
+     * @throws IllegalArgumentException if the clear or update API call fails
+     */
+    public void clearAndUpdateSheetTab(String accessToken, String spreadsheetId, String tabName, ArrayNode rows) {
+        // 1. Clear existing content
+        String clearUrl = "https://sheets.googleapis.com/v4/spreadsheets/"
+            + urlEncode(spreadsheetId) + "/values/" + urlEncode(tabName + "!A:ZZ") + ":clear";
+        HttpRequest clearReq = HttpRequest.newBuilder()
+            .uri(URI.create(clearUrl))
+            .timeout(Duration.ofSeconds(20))
+            .header("Authorization", "Bearer " + accessToken)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString("{}"))
+            .build();
+
+        try {
+            HttpResponse<String> clearResp = httpClient.send(clearReq, HttpResponse.BodyHandlers.ofString());
+            if (clearResp.statusCode() != 200) {
+                throw new IllegalArgumentException("sheets_clear_failed: status=" + clearResp.statusCode()
+                    + " tab=" + tabName + " body=" + clearResp.body());
+            }
+
+            if (rows == null || rows.isEmpty()) return;
+
+            // 2. Write new values
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("range", tabName + "!A1");
+            body.put("majorDimension", "ROWS");
+            body.set("values", rows);
+
+            String updateUrl = "https://sheets.googleapis.com/v4/spreadsheets/"
+                + urlEncode(spreadsheetId) + "/values/"
+                + urlEncode(tabName + "!A1") + "?valueInputOption=USER_ENTERED";
+            HttpRequest updateReq = HttpRequest.newBuilder()
+                .uri(URI.create(updateUrl))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + accessToken)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build();
+
+            HttpResponse<String> updateResp = httpClient.send(updateReq, HttpResponse.BodyHandlers.ofString());
+            if (updateResp.statusCode() != 200) {
+                throw new IllegalArgumentException("sheets_update_failed: status=" + updateResp.statusCode()
+                    + " tab=" + tabName + " body=" + updateResp.body());
+            }
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("sheets_write_failed: tab=" + tabName, e);
+        }
     }
 
     public static record Tokens(String accessToken, String refreshToken, long expiresInSeconds) {}
