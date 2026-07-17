@@ -93,3 +93,11 @@ flowchart LR
     USERS -->|one-to-one or one-to-many| USER_GOOGLE_CREDENTIALS
     USERS -->|one-to-many| SHOP_ACCESS_CODES
 ```
+
+## Contact
+
+**Let's Connect**
+
+For collaboration, engineering opportunities, or project discussions, use the contact page:
+
+- [Contact TylerPac Development](https://www.tylerpac.dev/contact)
