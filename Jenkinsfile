@@ -84,6 +84,12 @@ pipeline {
                 container('kaniko-frontend') {
                     sh '''
                         SHORT_SHA=$(echo "$GIT_COMMIT" | cut -c1-7)
+
+                        # Vite bakes env vars in at build time, not runtime - without this
+                        # the frontend falls back to its localhost:8080 default and can
+                        # never reach the real backend once deployed.
+                        echo "VITE_API_BASE_URL=/api" > frontend/.env.production
+
                         /kaniko/executor \
                             --context=dir://$(pwd)/frontend \
                             --dockerfile=Dockerfile \
