@@ -1,4 +1,4 @@
-export default function AuthView({ loading, onStartSteamSignIn }) {
+export default function AuthView({ loading, status, onStartSteamSignIn }) {
   return (
     <section style={{
       maxWidth: 420,
@@ -20,6 +20,9 @@ export default function AuthView({ loading, onStartSteamSignIn }) {
       >
         Continue with Steam
       </button>
+      {status && (
+        <p style={{ color: '#ccd', marginTop: '1rem', fontSize: '0.85rem' }}>{status}</p>
+      )}
     </section>
   );
 }

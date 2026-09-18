@@ -305,6 +305,7 @@ export default function App() {
       const url = await getSteamLoginUrl();
       window.location.assign(url);
     } catch (error) {
+      console.error('Steam sign-in failed', error);
       setStatus(`Steam sign-in failed: ${error.message}`);
       setLoading(false);
     }
@@ -687,7 +688,7 @@ export default function App() {
         />
       )}
       {view === 'auth' && !session.authenticated && (
-        <AuthView loading={loading} onStartSteamSignIn={startSteamSignIn} />
+        <AuthView loading={loading} status={status} onStartSteamSignIn={startSteamSignIn} />
       )}
       {view === 'dashboard' && session.authenticated && (
         <DashboardView
