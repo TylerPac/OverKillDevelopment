@@ -12,7 +12,16 @@ public final class SkinResponses {
 
     private SkinResponses() {}
 
-    public record SkinDto(long id, String skinKey, String weaponType, String displayName, JsonNode textures, JsonNode materials) {
+    public record SkinDto(
+        long id,
+        String skinKey,
+        String weaponType,
+        String displayName,
+        String skinType,
+        String variantClass,
+        JsonNode textures,
+        JsonNode materials
+    ) {
     }
 
     public record CatalogResponse(List<SkinDto> skins) {

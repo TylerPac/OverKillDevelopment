@@ -76,10 +76,16 @@ public final class DayzDatabase implements AutoCloseable {
                 materials %s NOT NULL,
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 price_cents INT NULL,
+                skin_type VARCHAR(16) NOT NULL DEFAULT 'texture',
+                variant_class VARCHAR(64) NULL,
                 created_at DATETIME(3) NOT NULL,
                 CONSTRAINT uk_skins_skin_key UNIQUE (skin_key)
             )
             """.formatted(jsonColumnType, jsonColumnType)).update();
+
+        // Tables created before item skins existed: add the columns once (CREATE TABLE IF NOT EXISTS never alters).
+        addColumnIfMissing("skins", "skin_type", "VARCHAR(16) NOT NULL DEFAULT 'texture'");
+        addColumnIfMissing("skins", "variant_class", "VARCHAR(64) NULL");
 
         jdbc.sql("""
             CREATE TABLE IF NOT EXISTS player_skins (
@@ -115,6 +121,20 @@ public final class DayzDatabase implements AutoCloseable {
                 CONSTRAINT fk_skill_xp_player FOREIGN KEY (player_id) REFERENCES players (id) ON DELETE CASCADE
             )
             """).update();
+    }
+
+    private void addColumnIfMissing(String table, String column, String definition) {
+        Long present = jdbc.sql("""
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE LOWER(TABLE_NAME) = :table AND LOWER(COLUMN_NAME) = :column AND TABLE_SCHEMA = SCHEMA()
+            """)
+            .param("table", table)
+            .param("column", column)
+            .query(Long.class)
+            .single();
+        if (present == 0) {
+            jdbc.sql("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).update();
+        }
     }
 
     @Override

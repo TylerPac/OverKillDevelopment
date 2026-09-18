@@ -15,7 +15,8 @@ import dev.tylerpac.backend.dayz.model.Skin;
 @ConditionalOnProperty(name = "app.dayz.enabled", havingValue = "true")
 public class SkinRepository {
 
-    private static final String COLUMNS = "id, skin_key, weapon_type, display_name, textures, materials";
+    private static final String COLUMNS =
+        "id, skin_key, weapon_type, display_name, textures, materials, skin_type, variant_class";
 
     private static final RowMapper<Skin> MAPPER = (rs, rowNum) -> new Skin(
         rs.getLong("id"),
@@ -23,7 +24,9 @@ public class SkinRepository {
         rs.getString("weapon_type"),
         rs.getString("display_name"),
         rs.getString("textures"),
-        rs.getString("materials"));
+        rs.getString("materials"),
+        rs.getString("skin_type"),
+        rs.getString("variant_class"));
 
     private final JdbcClient jdbc;
 

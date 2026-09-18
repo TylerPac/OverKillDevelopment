@@ -97,6 +97,20 @@ class DayzSkinSkillTest {
     }
 
     @Test
+    void itemSkinsExposeTheirVariantClassAndTextureSkinsDoNot() throws Exception {
+        db.jdbc().sql("""
+            INSERT INTO skins (skin_key, weapon_type, display_name, textures, materials, enabled, skin_type, variant_class, created_at)
+            VALUES ('AK_Gold','AKM','Gold AK','[]','[]',TRUE,'item','AKM_Gold',:now)
+            """).param("now", LocalDateTime.now()).update();
+
+        mvc.perform(post("/api/dayz/skins/catalog/query").contentType(MediaType.APPLICATION_JSON).content("{" + CREDS + "}"))
+            .andExpect(jsonPath("$.skins[0].skinType").value("texture"))
+            .andExpect(jsonPath("$.skins[0].variantClass").value(""))
+            .andExpect(jsonPath("$.skins[2].skinType").value("item"))
+            .andExpect(jsonPath("$.skins[2].variantClass").value("AKM_Gold"));
+    }
+
+    @Test
     void grantIsIdempotentAndOwnedReflectsIt() throws Exception {
         String body = "{" + CREDS + ",\"steamId\":\"" + STEAM_ID + "\",\"skinKey\":\"AK_Test\",\"source\":\"admin\"}";
         mvc.perform(post("/api/dayz/skins/grant").contentType(MediaType.APPLICATION_JSON).content(body))

@@ -111,8 +111,12 @@ public class DayzSkinService {
     }
 
     static SkinDto toDto(Skin skin) {
+        String variant = skin.variantClass();
+        if (variant == null) {
+            variant = "";
+        }
         return new SkinDto(
-            skin.id(), skin.skinKey(), skin.weaponType(), skin.displayName(),
+            skin.id(), skin.skinKey(), skin.weaponType(), skin.displayName(), skin.skinType(), variant,
             parseArray(skin.textures()), parseArray(skin.materials()));
     }
 
