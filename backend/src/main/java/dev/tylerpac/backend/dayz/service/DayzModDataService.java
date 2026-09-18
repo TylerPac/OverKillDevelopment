@@ -22,6 +22,7 @@ public class DayzModDataService {
 
     private static final Pattern MOD_NAME = Pattern.compile("^[A-Za-z0-9_.-]{1,64}$");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final int MAX_JSON_DEPTH = 32;
 
     private final ModDataRepository modDataRepository;
     private final PlayerRepository playerRepository;
@@ -44,6 +45,10 @@ public class DayzModDataService {
             throw new DayzApiException(HttpStatus.BAD_REQUEST, "data_must_be_object");
         }
 
+        if (exceedsDepth(data, MAX_JSON_DEPTH)) {
+            throw new DayzApiException(HttpStatus.BAD_REQUEST, "data_too_deep");
+        }
+
         String json = MAPPER.writeValueAsString(data);
         if (json.getBytes(StandardCharsets.UTF_8).length > maxDataBytes) {
             throw new DayzApiException(HttpStatus.PAYLOAD_TOO_LARGE, "payload_too_large");
@@ -64,6 +69,28 @@ public class DayzModDataService {
         validateModName(modName);
         return modDataRepository.findData(id, modName)
             .orElseThrow(() -> new DayzApiException(HttpStatus.NOT_FOUND, "data_not_found"));
+    }
+
+    /** Iterative so a hostile deeply nested body cannot overflow the stack; MySQL itself rejects JSON deeper than 100. */
+    static boolean exceedsDepth(JsonNode root, int maxDepth) {
+        java.util.ArrayDeque<JsonNode> nodes = new java.util.ArrayDeque<>();
+        java.util.ArrayDeque<Integer> depths = new java.util.ArrayDeque<>();
+        nodes.push(root);
+        depths.push(1);
+        while (!nodes.isEmpty()) {
+            JsonNode node = nodes.pop();
+            int depth = depths.pop();
+            if (depth > maxDepth) {
+                return true;
+            }
+            for (JsonNode child : node) {
+                if (child.isObject() || child.isArray()) {
+                    nodes.push(child);
+                    depths.push(depth + 1);
+                }
+            }
+        }
+        return false;
     }
 
     private static void validateModName(String modName) {

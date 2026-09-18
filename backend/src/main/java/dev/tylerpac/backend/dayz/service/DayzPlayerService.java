@@ -25,7 +25,7 @@ public class DayzPlayerService {
 
     public Player register(String steamId, String playerName) {
         long id = parseSteamId(steamId);
-        String name = playerName == null ? "" : playerName.trim();
+        String name = playerName == null ? "" : playerName.replaceAll("\\p{Cntrl}", "").trim();
         if (name.isEmpty()) {
             throw new DayzApiException(HttpStatus.BAD_REQUEST, "player_name_required");
         }

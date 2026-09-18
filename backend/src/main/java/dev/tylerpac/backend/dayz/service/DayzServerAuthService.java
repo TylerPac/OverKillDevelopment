@@ -19,15 +19,22 @@ import dev.tylerpac.backend.dayz.repo.DayzServerRepository;
 @ConditionalOnProperty(name = "app.dayz.enabled", havingValue = "true")
 public class DayzServerAuthService {
 
-    private static final long CACHE_TTL_NANOS = 60_000_000_000L;
-    private static final int CACHE_MAX_ENTRIES = 1024;
+    private static final long KNOWN_TTL_NANOS = 60_000_000_000L;
+    private static final long UNKNOWN_TTL_NANOS = 10_000_000_000L;
+    private static final int UNKNOWN_MAX_ENTRIES = 1024;
     private static final int MAX_CREDENTIAL_LENGTH = 256;
+    private static final String DUMMY_HASH = sha256Hex("dayz-unknown-server");
 
     private record CachedServer(DayzServer server, long expiresAtNanos) {
     }
 
     private final DayzServerRepository serverRepository;
-    private final ConcurrentHashMap<String, CachedServer> cache = new ConcurrentHashMap<>();
+
+    /** Real servers: tiny and bounded by rows in dayz_servers, so an attacker can never evict them. */
+    private final ConcurrentHashMap<String, CachedServer> known = new ConcurrentHashMap<>();
+
+    /** Unknown ids are cached briefly and capped so random ids cost O(1) without growing memory or hitting the DB. */
+    private final ConcurrentHashMap<String, Long> unknown = new ConcurrentHashMap<>();
 
     public DayzServerAuthService(DayzServerRepository serverRepository) {
         this.serverRepository = serverRepository;
@@ -40,14 +47,15 @@ public class DayzServerAuthService {
             throw unauthorized();
         }
 
-        Optional<DayzServer> server = lookup(serverId);
-        if (server.isEmpty() || !server.get().enabled()) {
-            throw unauthorized();
-        }
+        DayzServer server = lookup(serverId).orElse(null);
 
-        byte[] expected = server.get().apiKeyHash().getBytes(StandardCharsets.UTF_8);
-        byte[] actual = sha256Hex(apiKey).getBytes(StandardCharsets.UTF_8);
-        if (!MessageDigest.isEqual(expected, actual)) {
+        // Always hash and compare, even for unknown servers, so timing does not reveal which server ids exist.
+        String expected = server == null ? DUMMY_HASH : server.apiKeyHash();
+        boolean keyMatches = MessageDigest.isEqual(
+            expected.getBytes(StandardCharsets.UTF_8),
+            sha256Hex(apiKey).getBytes(StandardCharsets.UTF_8));
+
+        if (server == null || !server.enabled() || !keyMatches) {
             throw unauthorized();
         }
     }
@@ -67,16 +75,35 @@ public class DayzServerAuthService {
 
     private Optional<DayzServer> lookup(String serverId) {
         long now = nowNanos();
-        CachedServer cached = cache.get(serverId);
+
+        CachedServer cached = known.get(serverId);
         if (cached != null && now - cached.expiresAtNanos() < 0) {
-            return Optional.ofNullable(cached.server());
+            return Optional.of(cached.server());
+        }
+
+        Long unknownUntil = unknown.get(serverId);
+        if (unknownUntil != null && now - unknownUntil < 0) {
+            return Optional.empty();
         }
 
         Optional<DayzServer> loaded = serverRepository.findByServerId(serverId);
-        if (cache.size() < CACHE_MAX_ENTRIES) {
-            cache.put(serverId, new CachedServer(loaded.orElse(null), now + CACHE_TTL_NANOS));
+        if (loaded.isPresent()) {
+            known.put(serverId, new CachedServer(loaded.get(), now + KNOWN_TTL_NANOS));
+            unknown.remove(serverId);
+        } else {
+            known.remove(serverId);
+            rememberUnknown(serverId, now);
         }
         return loaded;
+    }
+
+    private void rememberUnknown(String serverId, long now) {
+        if (unknown.size() >= UNKNOWN_MAX_ENTRIES) {
+            unknown.values().removeIf(expiresAt -> now - expiresAt >= 0);
+        }
+        if (unknown.size() < UNKNOWN_MAX_ENTRIES) {
+            unknown.put(serverId, now + UNKNOWN_TTL_NANOS);
+        }
     }
 
     private static DayzApiException unauthorized() {

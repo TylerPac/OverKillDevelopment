@@ -1,6 +1,9 @@
 package dev.tylerpac.backend.dayz.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -19,6 +22,8 @@ import dev.tylerpac.backend.dayz.service.DayzApiException;
 @ConditionalOnProperty(name = "app.dayz.enabled", havingValue = "true")
 public class DayzExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(DayzExceptionHandler.class);
+
     @ExceptionHandler(DayzApiException.class)
     public ResponseEntity<String> handleApi(DayzApiException ex) {
         return ResponseEntity.status(ex.getStatus()).body(ex.getMessage());
@@ -34,6 +39,13 @@ public class DayzExceptionHandler {
             }
         }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(code);
+    }
+
+    /** Database down or slow: report 503 without leaking SQL, table names or connection details. */
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<String> handleDatabase(DataAccessException ex) {
+        log.warn("DayZ database error: {}", ex.getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("service_unavailable");
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, HttpMediaTypeNotSupportedException.class})

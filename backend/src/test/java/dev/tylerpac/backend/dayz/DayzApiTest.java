@@ -178,6 +178,66 @@ void disabledServerIsRejectedOnceCacheExpires() {
     }
 
     @Test
+    void postQueryReadsKeepCredentialsOutOfTheUrl() throws Exception {
+        playerService.register(STEAM_ID, "SirPacster");
+        modDataService.save(STEAM_ID, "OverKillApiTest", new tools.jackson.databind.ObjectMapper().readTree("{\"a\":1}"));
+
+        String creds = "\"serverId\":\"overkill-test\",\"apiKey\":\"secret\",\"steamId\":\"" + STEAM_ID + "\"";
+        mvc.perform(post("/api/dayz/mod-data/query").contentType(MediaType.APPLICATION_JSON)
+                .content("{" + creds + ",\"modName\":\"OverKillApiTest\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.a").value(1));
+        mvc.perform(post("/api/dayz/players/query").contentType(MediaType.APPLICATION_JSON)
+                .content("{" + creds + "}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.steamId").value(STEAM_ID));
+        mvc.perform(post("/api/dayz/mod-data/query").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"serverId\":\"overkill-test\",\"apiKey\":\"bad\",\"steamId\":\"" + STEAM_ID + "\",\"modName\":\"OverKillApiTest\"}"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void oversizeRequestBodyIsRejectedBeforeParsing() throws Exception {
+        MockMvc limited = MockMvcBuilders
+            .standaloneSetup(new DayzPlayerController(authService, playerService))
+            .setControllerAdvice(new DayzExceptionHandler())
+            .addFilters(new dev.tylerpac.backend.dayz.security.DayzRequestSizeFilter(1024))
+            .build();
+
+        String huge = "{\"serverId\":\"overkill-test\",\"apiKey\":\"secret\",\"steamId\":\"" + STEAM_ID
+            + "\",\"playerName\":\"" + "x".repeat(8192) + "\"}";
+        limited.perform(post("/api/dayz/players").contentType(MediaType.APPLICATION_JSON).content(huge))
+            .andExpect(status().isPayloadTooLarge())
+            .andExpect(content().string("payload_too_large"));
+    }
+
+    @Test
+    void deeplyNestedDataIsRejected() throws Exception {
+        playerService.register(STEAM_ID, "SirPacster");
+        String nested = "{\"a\":".repeat(40) + "1" + "}".repeat(40);
+        tools.jackson.databind.JsonNode data = new tools.jackson.databind.ObjectMapper().readTree(nested);
+
+        DayzApiException ex = assertThrows(DayzApiException.class, () -> modDataService.save(STEAM_ID, "M", data));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertEquals("data_too_deep", ex.getMessage());
+    }
+
+    @Test
+    void floodOfUnknownServerIdsCannotBlockRealServers() {
+        for (int i = 0; i < 3000; i++) {
+            final int n = i;
+            assertThrows(DayzApiException.class, () -> authService.verify("bogus-" + n, "secret"));
+        }
+        authService.verify("overkill-test", "secret");
+    }
+
+    @Test
+    void controlCharactersAreStrippedFromPlayerNames() {
+        Player p = playerService.register(STEAM_ID, "Sir\nPac ster");
+        assertEquals("SirPacster", p.playerName());
+    }
+
+    @Test
     void sha256HexIsStable() {
         assertNotEquals(DayzServerAuthService.sha256Hex("a"), DayzServerAuthService.sha256Hex("b"));
         assertEquals(64, DayzServerAuthService.sha256Hex("a").length());

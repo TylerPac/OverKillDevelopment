@@ -27,6 +27,12 @@ public class DayzDatabaseConfig {
         config.setMaximumPoolSize(maxPoolSize);
         config.setMinimumIdle(1);
         config.setConnectionTimeout(5_000);
+        // Fail fast instead of tying up Tomcat threads when the DayZ database stalls, and reuse prepared statements.
+        config.addDataSourceProperty("connectTimeout", "3000");
+        config.addDataSourceProperty("socketTimeout", "15000");
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "100");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "1024");
 
         DayzDatabase db = new DayzDatabase(new HikariDataSource(config));
         db.initSchema("JSON");

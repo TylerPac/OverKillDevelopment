@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import dev.tylerpac.backend.dayz.dto.ModDataQueryRequest;
 import dev.tylerpac.backend.dayz.dto.SaveModDataRequest;
 import dev.tylerpac.backend.dayz.dto.SaveModDataResponse;
 import dev.tylerpac.backend.dayz.service.DayzModDataService;
@@ -34,6 +35,13 @@ public class DayzModDataController {
     public ResponseEntity<SaveModDataResponse> save(@Valid @RequestBody SaveModDataRequest request) {
         authService.verify(request.getServerId(), request.getApiKey());
         return ResponseEntity.ok(modDataService.save(request.getSteamId(), request.getModName(), request.getData()));
+    }
+
+    /** Preferred read: credentials travel in the body, not the URL. Returns only the stored mod JSON. */
+    @PostMapping(value = "/query", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> query(@Valid @RequestBody ModDataQueryRequest request) {
+        authService.verify(request.getServerId(), request.getApiKey());
+        return ResponseEntity.ok(modDataService.load(request.getModName(), request.getSteamId()));
     }
 
     /** Body is only the stored mod JSON so DayZ can deserialize it straight into its own model class. */

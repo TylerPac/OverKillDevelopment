@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import dev.tylerpac.backend.dayz.dto.PlayerResponse;
+import dev.tylerpac.backend.dayz.dto.PlayerQueryRequest;
 import dev.tylerpac.backend.dayz.dto.RegisterPlayerRequest;
 import dev.tylerpac.backend.dayz.service.DayzPlayerService;
 import dev.tylerpac.backend.dayz.service.DayzServerAuthService;
@@ -33,6 +34,12 @@ public class DayzPlayerController {
     public ResponseEntity<PlayerResponse> register(@Valid @RequestBody RegisterPlayerRequest request) {
         authService.verify(request.getServerId(), request.getApiKey());
         return ResponseEntity.ok(PlayerResponse.from(playerService.register(request.getSteamId(), request.getPlayerName())));
+    }
+
+    @PostMapping("/query")
+    public ResponseEntity<PlayerResponse> query(@Valid @RequestBody PlayerQueryRequest request) {
+        authService.verify(request.getServerId(), request.getApiKey());
+        return ResponseEntity.ok(PlayerResponse.from(playerService.get(request.getSteamId())));
     }
 
     @GetMapping("/{steamId}")
