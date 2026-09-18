@@ -64,6 +64,59 @@ public final class DayzDatabase implements AutoCloseable {
             """).update();
     }
 
+    /** Skins catalog, ownership, per-weapon equipped skin and per-category skill XP. Idempotent. */
+    public void initSkinsAndSkillsSchema(String jsonColumnType) {
+        jdbc.sql("""
+            CREATE TABLE IF NOT EXISTS skins (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                skin_key VARCHAR(64) NOT NULL,
+                weapon_type VARCHAR(64) NOT NULL,
+                display_name VARCHAR(128) NOT NULL,
+                textures %s NOT NULL,
+                materials %s NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                price_cents INT NULL,
+                created_at DATETIME(3) NOT NULL,
+                CONSTRAINT uk_skins_skin_key UNIQUE (skin_key)
+            )
+            """.formatted(jsonColumnType, jsonColumnType)).update();
+
+        jdbc.sql("""
+            CREATE TABLE IF NOT EXISTS player_skins (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                player_id BIGINT NOT NULL,
+                skin_id BIGINT NOT NULL,
+                source VARCHAR(16) NOT NULL,
+                granted_at DATETIME(3) NOT NULL,
+                CONSTRAINT uk_player_skins_player_skin UNIQUE (player_id, skin_id),
+                CONSTRAINT fk_player_skins_player FOREIGN KEY (player_id) REFERENCES players (id) ON DELETE CASCADE,
+                CONSTRAINT fk_player_skins_skin FOREIGN KEY (skin_id) REFERENCES skins (id) ON DELETE CASCADE
+            )
+            """).update();
+
+        jdbc.sql("""
+            CREATE TABLE IF NOT EXISTS player_skin_equipped (
+                player_id BIGINT NOT NULL,
+                weapon_type VARCHAR(64) NOT NULL,
+                skin_id BIGINT NOT NULL,
+                PRIMARY KEY (player_id, weapon_type),
+                CONSTRAINT fk_equipped_player FOREIGN KEY (player_id) REFERENCES players (id) ON DELETE CASCADE,
+                CONSTRAINT fk_equipped_skin FOREIGN KEY (skin_id) REFERENCES skins (id) ON DELETE CASCADE
+            )
+            """).update();
+
+        jdbc.sql("""
+            CREATE TABLE IF NOT EXISTS player_skill_xp (
+                player_id BIGINT NOT NULL,
+                category VARCHAR(32) NOT NULL,
+                xp BIGINT NOT NULL,
+                updated_at DATETIME(3) NOT NULL,
+                PRIMARY KEY (player_id, category),
+                CONSTRAINT fk_skill_xp_player FOREIGN KEY (player_id) REFERENCES players (id) ON DELETE CASCADE
+            )
+            """).update();
+    }
+
     @Override
     public void close() {
         dataSource.close();

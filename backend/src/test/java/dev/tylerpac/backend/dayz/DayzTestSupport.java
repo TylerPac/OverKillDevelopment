@@ -20,6 +20,7 @@ public final class DayzTestSupport {
         config.setMaximumPoolSize(2);
         DayzDatabase db = new DayzDatabase(new HikariDataSource(config));
         db.initSchema("CLOB");
+        db.initSkinsAndSkillsSchema("CLOB");
         return db;
     }
 }

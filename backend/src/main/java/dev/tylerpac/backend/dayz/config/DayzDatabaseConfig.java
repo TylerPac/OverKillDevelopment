@@ -36,6 +36,7 @@ public class DayzDatabaseConfig {
 
         DayzDatabase db = new DayzDatabase(new HikariDataSource(config));
         db.initSchema("JSON");
+        db.initSkinsAndSkillsSchema("JSON");
         return db;
     }
 }
