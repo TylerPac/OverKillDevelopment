@@ -2,6 +2,7 @@ package dev.tylerpac.backend.dayz.config;
 
 import javax.sql.DataSource;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -16,14 +17,21 @@ public final class DayzDatabase implements AutoCloseable {
 
     private final HikariDataSource dataSource;
     private final JdbcClient jdbc;
+    private final JdbcTemplate template;
 
     public DayzDatabase(HikariDataSource dataSource) {
         this.dataSource = dataSource;
         this.jdbc = JdbcClient.create(dataSource);
+        this.template = new JdbcTemplate(dataSource);
     }
 
     public JdbcClient jdbc() {
         return jdbc;
+    }
+
+    /** For JDBC batch updates (JdbcClient has no batch API). */
+    public JdbcTemplate template() {
+        return template;
     }
 
     /** Idempotent schema creation. {@code jsonColumnType} is "JSON" on MySQL (tests pass a portable type). */

@@ -187,7 +187,43 @@ class DayzSkinSkillTest {
             .andExpect(status().isBadRequest()).andExpect(content().string("invalid_category"));
         mvc.perform(post("/api/dayz/skills/xp/batch").contentType(MediaType.APPLICATION_JSON)
                 .content("{" + CREDS + ",\"entries\":[{\"steamId\":\"76561198999999999\",\"deltas\":{\"AR\":5}}]}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.skipped").value(1));
+            .andExpect(status().isOk());
+        assertEquals(0, db.jdbc().sql("SELECT COUNT(*) FROM player_skill_xp WHERE xp = 5").query(Integer.class).single());
+    }
+
+    @Test
+    void bootstrapRegistersAndReturnsEachRequestedPartAsAJsonString() throws Exception {
+        MockMvc withBootstrap = MockMvcBuilders
+            .standaloneSetup(new dev.tylerpac.backend.dayz.controller.DayzBootstrapController(
+                new DayzServerAuthService(new DayzServerRepository(db)),
+                new dev.tylerpac.backend.dayz.service.DayzBootstrapService(playerService, skinService, skillService)))
+            .setControllerAdvice(new DayzExceptionHandler())
+            .build();
+
+        skinService.grant(STEAM_ID, "AK_Test", "admin");
+        skillService.addXpBatch(java.util.List.of(entry(STEAM_ID, "AR", 50)));
+
+        String body = "{" + CREDS + ",\"steamId\":\"" + STEAM_ID + "\",\"playerName\":\"SirPacster\",\"include\":[\"skins\",\"skills\"]}";
+        withBootstrap.perform(post("/api/dayz/bootstrap").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.player.steamId").value(STEAM_ID))
+            .andExpect(jsonPath("$.parts.length()").value(2))
+            .andExpect(jsonPath("$.parts[0].name").value("skins"))
+            .andExpect(jsonPath("$.parts[0].data").value(org.hamcrest.Matchers.containsString("\"skinIds\":[" + akSkinId + "]")))
+            .andExpect(jsonPath("$.parts[1].name").value("skills"))
+            .andExpect(jsonPath("$.parts[1].data").value(org.hamcrest.Matchers.containsString("\"xp\":50")));
+
+        String onlyRegister = "{" + CREDS + ",\"steamId\":\"" + STEAM_ID + "\",\"playerName\":\"SirPacster\"}";
+        withBootstrap.perform(post("/api/dayz/bootstrap").contentType(MediaType.APPLICATION_JSON).content(onlyRegister))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.parts.length()").value(0));
+    }
+
+    private static dev.tylerpac.backend.dayz.dto.XpBatchRequest.Entry entry(String steamId, String category, int xp) {
+        dev.tylerpac.backend.dayz.dto.XpBatchRequest.Entry e = new dev.tylerpac.backend.dayz.dto.XpBatchRequest.Entry();
+        e.setSteamId(steamId);
+        e.setDeltas(java.util.Map.of(category, xp));
+        return e;
     }
 
     @Test

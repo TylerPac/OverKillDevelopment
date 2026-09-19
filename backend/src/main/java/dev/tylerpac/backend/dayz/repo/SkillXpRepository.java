@@ -1,10 +1,13 @@
 package dev.tylerpac.backend.dayz.repo;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -14,24 +17,36 @@ import dev.tylerpac.backend.dayz.config.DayzDatabase;
 @ConditionalOnProperty(name = "app.dayz.enabled", havingValue = "true")
 public class SkillXpRepository {
 
+    private static final String UPSERT = """
+        INSERT INTO player_skill_xp (player_id, category, xp, updated_at)
+        SELECT p.id, ?, ?, ? FROM players p WHERE p.steam_id = ?
+        ON DUPLICATE KEY UPDATE xp = xp + ?, updated_at = ?
+        """;
+
+    public record XpDelta(long steamId, String category, long delta) {
+    }
+
     private final JdbcClient jdbc;
+    private final JdbcTemplate template;
 
     public SkillXpRepository(DayzDatabase db) {
         this.jdbc = db.jdbc();
+        this.template = db.template();
     }
 
-    /** Atomic increment, so several servers can add XP for the same player without overwriting each other. */
-    public int addXp(long steamId, String category, long delta, LocalDateTime now) {
-        return jdbc.sql("""
-            INSERT INTO player_skill_xp (player_id, category, xp, updated_at)
-            SELECT p.id, :category, :delta, :now FROM players p WHERE p.steam_id = :steamId
-            ON DUPLICATE KEY UPDATE xp = xp + :delta, updated_at = :now
-            """)
-            .param("steamId", steamId)
-            .param("category", category)
-            .param("delta", delta)
-            .param("now", now)
-            .update();
+    /**
+     * Atomic increments (xp = xp + delta), so several servers can add XP for the same player without overwriting
+     * each other. The whole flush is one JDBC batch, i.e. one round trip. Deltas for unknown players add nothing.
+     */
+    public void addXpBatch(List<XpDelta> deltas, LocalDateTime now) {
+        if (deltas.isEmpty()) {
+            return;
+        }
+        List<Object[]> args = new ArrayList<>(deltas.size());
+        for (XpDelta d : deltas) {
+            args.add(new Object[] {d.category(), d.delta(), now, d.steamId(), d.delta(), now});
+        }
+        template.batchUpdate(UPSERT, args);
     }
 
     public Map<String, Long> findXp(long steamId) {

@@ -30,6 +30,8 @@ public class DayzDatabaseConfig {
         // Fail fast instead of tying up Tomcat threads when the DayZ database stalls, and reuse prepared statements.
         config.addDataSourceProperty("connectTimeout", "3000");
         config.addDataSourceProperty("socketTimeout", "15000");
+        // Lets a JDBC batch (XP flush) go to MySQL as one round trip.
+        config.addDataSourceProperty("rewriteBatchedStatements", "true");
         config.addDataSourceProperty("cachePrepStmts", "true");
         config.addDataSourceProperty("prepStmtCacheSize", "100");
         config.addDataSourceProperty("prepStmtCacheSqlLimit", "1024");

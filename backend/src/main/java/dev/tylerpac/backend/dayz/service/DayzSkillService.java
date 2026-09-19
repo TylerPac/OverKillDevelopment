@@ -1,6 +1,5 @@
 package dev.tylerpac.backend.dayz.service;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,24 +43,17 @@ public class DayzSkillService {
             }
         }
 
-        LocalDateTime now = DayzPlayerService.utcNow();
-        int updated = 0;
-        int skipped = 0;
+        List<SkillXpRepository.XpDelta> deltas = new ArrayList<>();
         for (XpBatchRequest.Entry entry : entries) {
             long steamId = Long.parseLong(entry.getSteamId());
-            boolean applied = false;
             for (Map.Entry<String, Integer> delta : entry.getDeltas().entrySet()) {
-                if (skillXpRepository.addXp(steamId, delta.getKey(), delta.getValue(), now) > 0) {
-                    applied = true;
-                }
-            }
-            if (applied) {
-                updated++;
-            } else {
-                skipped++;
+                deltas.add(new SkillXpRepository.XpDelta(steamId, delta.getKey(), delta.getValue()));
             }
         }
-        return new XpBatchResponse(true, updated, skipped);
+
+        // One JDBC batch for the whole flush. Players that are not registered yet simply add nothing.
+        skillXpRepository.addXpBatch(deltas, DayzPlayerService.utcNow());
+        return new XpBatchResponse(true, entries.size(), 0);
     }
 
     public SkillQueryResponse query(String steamId) {
