@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import useSessionState from './hooks/useSessionState';
-import { getDiscordLinkUrl, getGithubLinkUrl, getSteamLoginUrl } from './services/authService';
+import { getDiscordLinkUrl, getGithubLinkUrl, SIGN_IN_PATH, signOutOfServer } from './services/authService';
 import { apiBase, callProtectedText, issueDownloadToken, getProductDownloadLink } from './services/apiClient';
 import {
   createCartCheckoutSession,
@@ -62,15 +62,15 @@ export default function App() {
       const nextProducts = await getProducts();
       setProducts(Array.isArray(nextProducts) ? nextProducts : []);
 
-      if (!session.authenticated || !session.token) {
+      if (!session.authenticated) {
         setOrders([]);
         return;
       }
 
-      const nextOrders = await getOrders(session.token);
+      const nextOrders = await getOrders();
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
 
-      await session.loadAuthProfile(session.token);
+      await session.loadAuthProfile();
     } catch (error) {
       setStatus(`Shop load failed: ${error.message}`);
     } finally {
@@ -79,17 +79,17 @@ export default function App() {
   }
 
   async function loadCustomerData() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setOrders([]);
       return;
     }
 
     setShopLoading(true);
     try {
-      const nextOrders = await getOrders(session.token);
+      const nextOrders = await getOrders();
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
 
-      await session.loadAuthProfile(session.token);
+      await session.loadAuthProfile();
     } catch (error) {
       setStatus(`Customer page load failed: ${error.message}`);
     } finally {
@@ -98,58 +98,29 @@ export default function App() {
   }
 
   useEffect(() => {
-    const path = window.location.pathname;
-    if (path !== '/steam-callback') {
+    if (window.location.pathname !== '/steam-callback' || !session.ready) {
       return;
     }
 
-    const search = new URLSearchParams(window.location.search);
-    const tokenFromUrl = search.get('token');
-    const refreshFromUrl = search.get('refreshToken') || '';
-    const usernameFromUrl = search.get('username') || '';
+    const failed = new URLSearchParams(window.location.search).has('error');
+    window.history.replaceState({}, '', '/');
 
-    async function completeSteamCallback() {
-      if (!tokenFromUrl || !usernameFromUrl) {
-        setView('auth');
-        setStatus('Steam sign-in failed: missing callback data.');
-        window.history.replaceState({}, '', '/');
-        return;
-      }
-
-      session.saveSession(
-        {
-          token: tokenFromUrl,
-          refreshToken: refreshFromUrl,
-          emailVerified: true,
-          accountSetupComplete: true,
-        },
-        usernameFromUrl,
-      );
-
-      try {
-        await session.loadAuthProfile(tokenFromUrl);
-      } catch {
-        // Keep the sign-in successful even if the profile refresh fails.
-      }
-
-      try {
-        const nextOrders = await getOrders(tokenFromUrl);
-        setOrders(Array.isArray(nextOrders) ? nextOrders : []);
-      } catch {
-        // Non-fatal — dashboard will just show no orders.
-      }
-
-      setView('dashboard');
-      setStatus(`Signed in with Steam as ${usernameFromUrl}.`);
-      window.history.replaceState({}, '', '/');
+    if (failed || !session.authenticated) {
+      setView('auth');
+      setStatus('Steam sign-in failed. Please try again with your Steam account.');
+      return;
     }
 
-    completeSteamCallback();
-  }, [session]);
+    setView('dashboard');
+    setStatus(`Signed in with Steam as ${session.currentUser}.`);
+    getOrders()
+      .then((nextOrders) => setOrders(Array.isArray(nextOrders) ? nextOrders : []))
+      .catch(() => undefined); // Non-fatal: the dashboard will just show no orders.
+  }, [session.ready, session.authenticated, session.currentUser]);
 
   useEffect(() => {
     const path = window.location.pathname;
-    if (path !== '/discord-callback') {
+    if (path !== '/discord-callback' || !session.ready) {
       return;
     }
 
@@ -159,7 +130,7 @@ export default function App() {
     const discordUsernameFromUrl = search.get('discordUsername') || '';
 
     async function completeCallback() {
-      if (!session.token) {
+      if (!session.authenticated) {
         setView('auth');
         setStatus('Discord link failed: sign in first.');
         window.history.replaceState({}, '', '/');
@@ -182,7 +153,7 @@ export default function App() {
 
       setLoading(true);
       try {
-        await session.loadAuthProfile(session.token);
+        await session.loadAuthProfile();
         setView('dashboard');
         setStatus(
           discordUsernameFromUrl
@@ -203,7 +174,7 @@ export default function App() {
 
   useEffect(() => {
     const path = window.location.pathname;
-    if (path !== '/github-callback') {
+    if (path !== '/github-callback' || !session.ready) {
       return;
     }
 
@@ -213,7 +184,7 @@ export default function App() {
     const githubUsernameFromUrl = search.get('githubUsername') || '';
 
     async function completeCallback() {
-      if (!session.token) {
+      if (!session.authenticated) {
         setView('auth');
         setStatus('GitHub link failed: sign in first.');
         window.history.replaceState({}, '', '/');
@@ -236,7 +207,7 @@ export default function App() {
 
       setLoading(true);
       try {
-        await session.loadAuthProfile(session.token);
+        await session.loadAuthProfile();
         setView('dashboard');
         setStatus(
           githubUsernameFromUrl
@@ -259,7 +230,7 @@ export default function App() {
     const search = new URLSearchParams(window.location.search);
     const checkout = search.get('checkout');
     const sessionId = search.get('session_id');
-    if (!checkout) {
+    if (!checkout || !session.ready) {
       return;
     }
 
@@ -271,9 +242,9 @@ export default function App() {
       if (checkout === 'success') {
         setStatus('Payment completed. Refreshing your order...');
 
-        if (session.authenticated && session.token && sessionId) {
+        if (session.authenticated && sessionId) {
           try {
-            await syncCheckoutFromSession(session.token, sessionId);
+            await syncCheckoutFromSession(sessionId);
           } catch (error) {
             if (active) {
               setStatus(`Payment succeeded, but order sync failed: ${error.message}`);
@@ -296,23 +267,16 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session.authenticated, session.token]);
+  }, [session.ready, session.authenticated]);
 
   async function startSteamSignIn() {
     setLoading(true);
     setStatus('Redirecting to Steam...');
-    try {
-      const url = await getSteamLoginUrl();
-      window.location.assign(url);
-    } catch (error) {
-      console.error('Steam sign-in failed', error);
-      setStatus(`Steam sign-in failed: ${error.message}`);
-      setLoading(false);
-    }
+    window.location.assign(SIGN_IN_PATH);
   }
 
   async function startDiscordLink() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setView('auth');
       setStatus('Sign in with Steam before linking Discord.');
       return;
@@ -321,7 +285,7 @@ export default function App() {
     setLoading(true);
     setStatus('Redirecting to Discord...');
     try {
-      const url = await getDiscordLinkUrl(session.token);
+      const url = await getDiscordLinkUrl();
       window.location.assign(url);
     } catch (error) {
       setStatus(`Discord link failed: ${error.message}`);
@@ -330,7 +294,7 @@ export default function App() {
   }
 
   async function startGithubLink() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setView('auth');
       setStatus('Sign in with Steam before linking GitHub.');
       return;
@@ -339,7 +303,7 @@ export default function App() {
     setLoading(true);
     setStatus('Redirecting to GitHub...');
     try {
-      const url = await getGithubLinkUrl(session.token);
+      const url = await getGithubLinkUrl();
       window.location.assign(url);
     } catch (error) {
       setStatus(`GitHub link failed: ${error.message}`);
@@ -348,7 +312,7 @@ export default function App() {
   }
 
   async function handleCartCheckout() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in before purchasing.');
       setView('auth');
       return;
@@ -366,7 +330,7 @@ export default function App() {
 
     try {
       const idempotencyKey = `cart-${cart.slice().sort().join('-')}-${Date.now()}`;
-      const response = await createCartCheckoutSession(cart, session.token, idempotencyKey);
+      const response = await createCartCheckoutSession(cart, idempotencyKey);
 
       if (!response?.checkoutUrl) {
         throw new Error('No checkout URL returned by backend');
@@ -384,7 +348,7 @@ export default function App() {
   }
 
   async function handleRedeemFullAccessCode(code) {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in before redeeming a code.');
       setView('auth');
       return { success: false, message: 'Please log in before redeeming a code.' };
@@ -397,10 +361,10 @@ export default function App() {
     setShopLoading(true);
 
     try {
-      const response = await redeemFullAccessCode(code, session.token);
-      const nextOrders = await getOrders(session.token);
+      const response = await redeemFullAccessCode(code);
+      const nextOrders = await getOrders();
       setOrders(Array.isArray(nextOrders) ? nextOrders : []);
-      await session.loadAuthProfile(session.token);
+      await session.loadAuthProfile();
       setCart([]);
 
       const grantedCount = Number(response?.grantedCount || 0);
@@ -440,7 +404,7 @@ export default function App() {
   }
 
   async function handleBuy(productId) {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in before purchasing.');
       setView('auth');
       return;
@@ -456,7 +420,7 @@ export default function App() {
 
     try {
       const idempotencyKey = `checkout-${productId}-${Date.now()}`;
-      const response = await createCheckoutSession(productId, session.token, idempotencyKey);
+      const response = await createCheckoutSession(productId, idempotencyKey);
 
       if (!response?.checkoutUrl) {
         throw new Error('No checkout URL returned by backend');
@@ -474,7 +438,7 @@ export default function App() {
   }
 
   async function handleStartSubscription() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in before subscribing.');
       setView('auth');
       return;
@@ -490,7 +454,7 @@ export default function App() {
 
     try {
       const idempotencyKey = `subscription-premium-${Date.now()}`;
-      const response = await createSubscriptionCheckoutSession(session.token, idempotencyKey);
+      const response = await createSubscriptionCheckoutSession(idempotencyKey);
 
       if (!response?.checkoutUrl) {
         throw new Error('No checkout URL returned by backend');
@@ -508,7 +472,7 @@ export default function App() {
   }
 
   async function handleDownload(productId) {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in before downloading.');
       setView('auth');
       return;
@@ -519,7 +483,7 @@ export default function App() {
 
     try {
       // Try link-based download first (e.g. external URL configured per product)
-      const linkUrl = await getProductDownloadLink(productId, session.token);
+      const linkUrl = await getProductDownloadLink(productId);
       if (linkUrl) {
         window.open(linkUrl, '_blank', 'noopener,noreferrer');
         setStatus('Opening download link...');
@@ -527,13 +491,13 @@ export default function App() {
       }
 
       // Get a short-lived token and let the browser handle the download natively
-      const dlToken = await issueDownloadToken(productId, session.token);
+      const dlToken = await issueDownloadToken(productId);
       window.location.href = `${apiBase}/shop/download-stream?token=${encodeURIComponent(dlToken)}`;
 
       // Refresh orders shortly after so the "New Update" badge clears
       setTimeout(async () => {
         try {
-          const nextOrders = await getOrders(session.token);
+          const nextOrders = await getOrders();
           setOrders(Array.isArray(nextOrders) ? nextOrders : []);
         } catch (_) {
           // non-critical — badge will clear on next page load
@@ -563,10 +527,10 @@ export default function App() {
     }
 
     setLoading(true);
-    setStatus(`Calling ${path} with JWT...`);
+    setStatus(`Calling ${path} ...`);
 
     try {
-      const data = await callProtectedText(path, session.token);
+      const data = await callProtectedText(path);
       setProtectedData(data);
       setStatus(`Protected request to ${path} succeeded.`);
     } catch (error) {
@@ -584,12 +548,12 @@ export default function App() {
     }
   }
 
-  function signOut() {
-    session.clearSession();
-    setProtectedData('No protected request made yet.');
-    setOrders([]);
-    setView('home');
-    setStatus('Signed out.');
+  async function signOut() {
+    try {
+      window.location.assign(await signOutOfServer());
+    } catch (error) {
+      setStatus(`Sign-out failed: ${error.message}`);
+    }
   }
 
   function openAuth() {
@@ -621,7 +585,7 @@ export default function App() {
   }
 
   function openCustomer() {
-    if (!session.authenticated || !session.token) {
+    if (!session.authenticated) {
       setStatus('Please log in to access customer downloads.');
       setView('auth');
       return;
@@ -632,7 +596,7 @@ export default function App() {
   }
 
   if (view === 'tier-painter' && session.authenticated) {
-    return <TierPainterView token={session.token} onBack={() => setView('dashboard')} />;
+    return <TierPainterView onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -746,7 +710,7 @@ export default function App() {
         />
       )}
       {view === 'admin' && isAdmin && (
-        <AdminView token={session.token} />
+        <AdminView />
       )}
       {view === 'terms' && <TermsView />}
       {view === 'privacy' && <PrivacyView />}

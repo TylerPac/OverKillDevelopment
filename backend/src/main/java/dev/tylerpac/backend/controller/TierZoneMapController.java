@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 import dev.tylerpac.backend.model.TierZoneMap;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.repo.UserRepository;
-import dev.tylerpac.backend.security.JwtUtil;
 import dev.tylerpac.backend.service.TierZoneMapService;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -32,16 +31,13 @@ public class TierZoneMapController {
 
     private final TierZoneMapService tierZoneMapService;
     private final UserRepository userRepository;
-    private final JwtUtil jwtUtil;
 
     public TierZoneMapController(
         TierZoneMapService tierZoneMapService,
-        UserRepository userRepository,
-        JwtUtil jwtUtil
+        UserRepository userRepository
     ) {
         this.tierZoneMapService = tierZoneMapService;
         this.userRepository = userRepository;
-        this.jwtUtil = jwtUtil;
     }
 
     @GetMapping
@@ -168,15 +164,7 @@ public class TierZoneMapController {
     }
 
     private User resolveCurrentUser(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (!StringUtils.hasText(header) || !header.startsWith("Bearer ")) {
-            return null;
-        }
-        String token = header.substring(7);
-        if (!jwtUtil.validateToken(token)) {
-            return null;
-        }
-        String username = jwtUtil.extractUsername(token);
-        return userRepository.findByUsername(username).orElse(null);
+        java.security.Principal principal = request.getUserPrincipal();
+        return principal == null ? null : userRepository.findByUsername(principal.getName()).orElse(null);
     }
 }

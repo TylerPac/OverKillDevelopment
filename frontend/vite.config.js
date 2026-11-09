@@ -10,4 +10,11 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    // Sign-in redirects must reach the backend on the same hostname as the page
+    proxy: {
+      '/oauth2/authorization': 'http://localhost:8081',
+      '/login/oauth2': 'http://localhost:8081',
+    },
+  },
 })

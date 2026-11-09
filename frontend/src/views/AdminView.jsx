@@ -44,7 +44,7 @@ function StatusBadge({ code }) {
   return <span style={{ color: '#5bf', fontSize: '0.78rem', fontWeight: 600 }}>Available</span>;
 }
 
-function CreateCodeForm({ token, onCreated }) {
+function CreateCodeForm({ onCreated }) {
   const [mode, setMode] = useState('full');
   const [customCode, setCustomCode] = useState('');
   const [selectedProducts, setSelectedProducts] = useState([]);
@@ -63,14 +63,14 @@ function CreateCodeForm({ token, onCreated }) {
     setLoading(true);
     try {
       if (mode === 'full') {
-        await createFullUnlockCode(token, customCode.trim() || null);
+        await createFullUnlockCode(customCode.trim() || null);
       } else {
         if (selectedProducts.length === 0) {
           setError('Select at least one product.');
           setLoading(false);
           return;
         }
-        await createSpecificCode(token, customCode.trim() || null, selectedProducts);
+        await createSpecificCode(customCode.trim() || null, selectedProducts);
       }
       setCustomCode('');
       setSelectedProducts([]);
@@ -247,7 +247,7 @@ function CodeRow({ code, onRevoke, onDelete }) {
   );
 }
 
-function MarkProductReleaseForm({ token }) {
+function MarkProductReleaseForm() {
   const [selectedProduct, setSelectedProduct] = useState(AVAILABLE_PRODUCTS[0]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -259,7 +259,7 @@ function MarkProductReleaseForm({ token }) {
     setResult(null);
     setLoading(true);
     try {
-      const data = await markProductRelease(selectedProduct, token);
+      const data = await markProductRelease(selectedProduct);
       setResult(`Marked "${selectedProduct}" as updated at ${new Date(data.releasedAt).toLocaleString()}`);
     } catch (err) {
       setError(err.message || 'Failed to mark release.');
@@ -313,7 +313,7 @@ function MarkProductReleaseForm({ token }) {
   );
 }
 
-export default function AdminView({ token }) {
+export default function AdminView() {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -323,20 +323,20 @@ export default function AdminView({ token }) {
     setLoading(true);
     setError('');
     try {
-      const data = await listAccessCodes(token);
+      const data = await listAccessCodes();
       setCodes(data);
     } catch (err) {
       setError(err.message || 'Failed to load codes.');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchCodes(); }, [fetchCodes]);
 
   async function handleRevoke(id) {
     try {
-      await revokeCode(token, id);
+      await revokeCode(id);
       await fetchCodes();
     } catch (err) {
       setError(err.message || 'Failed to revoke code.');
@@ -345,7 +345,7 @@ export default function AdminView({ token }) {
 
   async function handleDelete(id) {
     try {
-      await deleteCode(token, id);
+      await deleteCode(id);
       await fetchCodes();
     } catch (err) {
       setError(err.message || 'Failed to delete code.');
@@ -365,9 +365,9 @@ export default function AdminView({ token }) {
         Admin — Access Codes
       </h2>
 
-      <CreateCodeForm token={token} onCreated={fetchCodes} />
+      <CreateCodeForm onCreated={fetchCodes} />
 
-      <MarkProductReleaseForm token={token} />
+      <MarkProductReleaseForm />
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>

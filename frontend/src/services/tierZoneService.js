@@ -1,29 +1,24 @@
 import { apiBase, callJson } from './apiClient';
 
-function authHeaders(token) {
-  return { Authorization: `Bearer ${token}` };
+export async function listTierZoneMaps() {
+  return callJson('/tier-zones');
 }
 
-export async function listTierZoneMaps(token) {
-  return callJson('/tier-zones', { headers: authHeaders(token) });
+export async function getTierZoneMap(mapName) {
+  return callJson(`/tier-zones/${encodeURIComponent(mapName)}`);
 }
 
-export async function getTierZoneMap(token, mapName) {
-  return callJson(`/tier-zones/${encodeURIComponent(mapName)}`, { headers: authHeaders(token) });
-}
-
-export async function saveTierZoneMap(token, mapName, polygonsJson) {
+export async function saveTierZoneMap(mapName, polygonsJson) {
   return callJson(`/tier-zones/${encodeURIComponent(mapName)}`, {
     method: 'PUT',
-    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ polygonsJson }),
   });
 }
 
-export async function deleteTierZoneMap(token, mapName) {
+export async function deleteTierZoneMap(mapName) {
   return callJson(`/tier-zones/${encodeURIComponent(mapName)}`, {
     method: 'DELETE',
-    headers: authHeaders(token),
   });
 }
 

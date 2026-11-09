@@ -2,6 +2,7 @@ package dev.tylerpac.backend.controller;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.Principal;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -13,6 +14,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,25 +23,20 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import dev.tylerpac.backend.dto.AuthResponse;
-import dev.tylerpac.backend.dto.RefreshTokenRequest;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.model.UserGoogleCredential;
 import dev.tylerpac.backend.model.UserTokenPurpose;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserGoogleCredentialRepository;
 import dev.tylerpac.backend.repo.UserRepository;
-import dev.tylerpac.backend.security.JwtUtil;
 import dev.tylerpac.backend.service.CryptoUtil;
 import dev.tylerpac.backend.service.DiscordOAuthService;
 import dev.tylerpac.backend.service.GitHubOAuthService;
 import dev.tylerpac.backend.service.GoogleOAuthService;
 import dev.tylerpac.backend.service.SheetsParsingService;
-import dev.tylerpac.backend.service.SteamAuthService;
 import dev.tylerpac.backend.service.UserTokenService;
 import dev.tylerpac.backend.util.JsonUtils;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
 import tools.jackson.databind.JsonNode;
 
 @RestController
@@ -50,9 +47,7 @@ public class AuthController {
 
     private final UserRepository userRepository;
     private final ShopOrderRepository shopOrderRepository;
-    private final JwtUtil jwtUtil;
     private final UserTokenService userTokenService;
-    private final SteamAuthService steamAuthService;
     private final DiscordOAuthService discordOAuthService;
     private final GitHubOAuthService gitHubOAuthService;
     private final UserGoogleCredentialRepository userGoogleCredentialRepository;
@@ -61,15 +56,11 @@ public class AuthController {
     private final SheetsParsingService sheetsParsingService;
     private final Environment environment;
     private final String frontendBaseUrl;
-    private final long accessTokenTtlMinutes;
-    private final long refreshTokenTtlDays;
 
     public AuthController(
         UserRepository userRepository,
         ShopOrderRepository shopOrderRepository,
-        JwtUtil jwtUtil,
         UserTokenService userTokenService,
-        SteamAuthService steamAuthService,
         DiscordOAuthService discordOAuthService,
         GitHubOAuthService gitHubOAuthService,
         UserGoogleCredentialRepository userGoogleCredentialRepository,
@@ -77,15 +68,11 @@ public class AuthController {
         GoogleOAuthService googleOAuthService,
         SheetsParsingService sheetsParsingService,
         Environment environment,
-        @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl,
-        @Value("${app.auth.access-token-ttl-minutes:15}") long accessTokenTtlMinutes,
-        @Value("${app.auth.refresh-token-ttl-days:7}") long refreshTokenTtlDays
+        @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl
     ) {
         this.userRepository = userRepository;
         this.shopOrderRepository = shopOrderRepository;
-        this.jwtUtil = jwtUtil;
         this.userTokenService = userTokenService;
-        this.steamAuthService = steamAuthService;
         this.discordOAuthService = discordOAuthService;
         this.gitHubOAuthService = gitHubOAuthService;
         this.userGoogleCredentialRepository = userGoogleCredentialRepository;
@@ -94,69 +81,6 @@ public class AuthController {
         this.sheetsParsingService = sheetsParsingService;
         this.environment = environment;
         this.frontendBaseUrl = frontendBaseUrl;
-        this.accessTokenTtlMinutes = accessTokenTtlMinutes;
-        this.refreshTokenTtlDays = refreshTokenTtlDays;
-    }
-
-    @GetMapping("/steam/login-url")
-    public ResponseEntity<?> steamLoginUrl() {
-        return ResponseEntity.ok(Map.of("url", steamAuthService.buildLoginUrl()));
-    }
-
-    @GetMapping("/steam/callback")
-    public ResponseEntity<?> steamCallback(HttpServletRequest request) {
-        try {
-            String steam64Id = steamAuthService.validateAndExtractSteam64Id(request.getParameterMap());
-            User user = findOrCreateSteamUser(steam64Id);
-            AuthResponse authResponse = buildAuthResponse(user);
-            String redirect = frontendBaseUrl
-                + "/steam-callback?token=" + urlEncode(authResponse.getToken())
-                + "&refreshToken=" + urlEncode(authResponse.getRefreshToken())
-                + "&expiresInSeconds=" + authResponse.getExpiresInSeconds()
-                + "&premiumUser=" + authResponse.isPremiumUser()
-                + "&subscriptionStatus=" + urlEncode(authResponse.getSubscriptionStatus() == null ? "none" : authResponse.getSubscriptionStatus())
-                + "&username=" + urlEncode(user.getUsername());
-            return ResponseEntity.status(HttpStatus.FOUND).header("Location", redirect).build();
-        } catch (IllegalArgumentException | IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", frontendBaseUrl + "/steam-callback?error=" + urlEncode(ex.getMessage()))
-                .build();
-        } catch (DataIntegrityViolationException ex) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", frontendBaseUrl + "/steam-callback?error=" + urlEncode("account_conflict"))
-                .build();
-        } catch (Exception ex) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", frontendBaseUrl + "/steam-callback?error=" + urlEncode("internal_error"))
-                .build();
-        }
-    }
-
-    @PostMapping("/refresh")
-    public ResponseEntity<?> refresh(@Valid @RequestBody RefreshTokenRequest req) {
-        Optional<User> userOpt = userTokenService.consumeToken(req.getRefreshToken(), UserTokenPurpose.REFRESH_SESSION);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body("invalid_refresh_token");
-        }
-
-        User user = userOpt.get();
-        String accessToken = jwtUtil.generateToken(user.getUsername(), 1000L * 60 * accessTokenTtlMinutes);
-        String nextRefreshToken = userTokenService.issueToken(
-            user,
-            UserTokenPurpose.REFRESH_SESSION,
-            Duration.ofDays(refreshTokenTtlDays)
-        );
-
-        return ResponseEntity.ok(new AuthResponse(
-            accessToken,
-            nextRefreshToken,
-            "Bearer",
-            accessTokenTtlMinutes * 60,
-            user.isPremiumUser(),
-            user.getStripeSubscriptionStatus(),
-            true,
-            true
-        ));
     }
 
     @GetMapping("/discord/link-url")
@@ -289,7 +213,9 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> me(HttpServletRequest request) {
+    public ResponseEntity<?> me(HttpServletRequest request, CsrfToken csrfToken) {
+        // Touching the token makes Spring Security write the XSRF-TOKEN cookie the frontend sends back.
+        csrfToken.getToken();
         User user = resolveCurrentUser(request);
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("unauthorized");
@@ -337,47 +263,9 @@ public class AuthController {
         ));
     }
 
-    private User findOrCreateSteamUser(String steam64Id) {
-        return userRepository.findBySteam64Id(steam64Id)
-            .orElseGet(() -> {
-                User created = User.fromSteamAccount(steam64Id);
-                return userRepository.save(created);
-            });
-    }
-
-    private AuthResponse buildAuthResponse(User user) {
-        String accessToken = jwtUtil.generateToken(user.getUsername(), 1000L * 60 * accessTokenTtlMinutes);
-        String refreshToken = userTokenService.issueToken(
-            user,
-            UserTokenPurpose.REFRESH_SESSION,
-            Duration.ofDays(refreshTokenTtlDays)
-        );
-
-        return new AuthResponse(
-            accessToken,
-            refreshToken,
-            "Bearer",
-            accessTokenTtlMinutes * 60,
-            user.isPremiumUser(),
-            user.getStripeSubscriptionStatus(),
-            true,
-            true
-        );
-    }
-
     private User resolveCurrentUser(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (!StringUtils.hasText(header) || !header.startsWith("Bearer ")) {
-            return null;
-        }
-
-        String token = header.substring(7);
-        if (!jwtUtil.validateToken(token)) {
-            return null;
-        }
-
-        String username = jwtUtil.extractUsername(token);
-        return userRepository.findByUsername(username).orElse(null);
+        Principal principal = request.getUserPrincipal();
+        return principal == null ? null : userRepository.findByUsername(principal.getName()).orElse(null);
     }
 
     private String urlEncode(String value) {

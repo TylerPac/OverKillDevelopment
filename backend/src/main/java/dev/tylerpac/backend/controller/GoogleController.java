@@ -26,7 +26,6 @@ import dev.tylerpac.backend.model.UserTokenPurpose;
 import dev.tylerpac.backend.repo.UserGoogleCredentialRepository;
 import dev.tylerpac.backend.repo.UserRepository;
 import dev.tylerpac.backend.repo.UserTemplateRepository;
-import dev.tylerpac.backend.security.JwtUtil;
 import dev.tylerpac.backend.service.CryptoUtil;
 import dev.tylerpac.backend.service.GoogleOAuthService;
 import dev.tylerpac.backend.service.SheetsParsingService;
@@ -50,7 +49,6 @@ public class GoogleController {
     private final UserTemplateRepository userTemplateRepository;
     private final ObjectMapper objectMapper;
     private final String frontendBaseUrl;
-    private final dev.tylerpac.backend.security.JwtUtil jwtUtil;
 
     public GoogleController(
         UserRepository userRepository,
@@ -61,7 +59,6 @@ public class GoogleController {
         SheetsParsingService sheetsParsingService,
         UserTemplateRepository userTemplateRepository,
         ObjectMapper objectMapper,
-        JwtUtil jwtUtil,
         @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl
     ) {
         this.userRepository = userRepository;
@@ -72,7 +69,6 @@ public class GoogleController {
         this.sheetsParsingService = sheetsParsingService;
         this.userTemplateRepository = userTemplateRepository;
         this.objectMapper = objectMapper;
-        this.jwtUtil = jwtUtil;
         this.frontendBaseUrl = frontendBaseUrl;
     }
 
@@ -542,12 +538,8 @@ public class GoogleController {
     }
 
     private User resolveCurrentUser(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) return null;
-        String token = header.substring(7);
-        if (!jwtUtil.validateToken(token)) return null;
-        String username = jwtUtil.extractUsername(token);
-        return userRepository.findByUsername(username).orElse(null);
+        java.security.Principal principal = request.getUserPrincipal();
+        return principal == null ? null : userRepository.findByUsername(principal.getName()).orElse(null);
     }
 
     private String urlEncode(String value) {

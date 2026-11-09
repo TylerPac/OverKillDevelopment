@@ -44,7 +44,7 @@ const MAP_PRESETS = [
   { label: 'Custom…',  worldSize: null  },
 ];
 
-export default function TierPainterView({ token, onBack }) {
+export default function TierPainterView({ onBack }) {
   const canvasRef = useRef(null);
 
   // Model (not state — mutated directly, canvas redraws via requestAnimationFrame)
@@ -484,9 +484,8 @@ export default function TierPainterView({ token, onBack }) {
 
   // ── Map slot operations ───────────────────────────────────────────────────
   async function fetchMapList() {
-    if (!token) return;
     try {
-      const maps = await listTierZoneMaps(token);
+      const maps = await listTierZoneMaps();
       setSavedMaps(maps);
     } catch (err) {
       setMapStatus(`Could not load saved maps: ${err.message}`);
@@ -495,7 +494,7 @@ export default function TierPainterView({ token, onBack }) {
 
   useEffect(() => {
     fetchMapList();
-  }, [token]);
+  }, []);
 
   async function handleSave() {
     if (!nameToBeSaved) { setMapStatus('Enter a profile name first.'); return; }
@@ -510,7 +509,7 @@ export default function TierPainterView({ token, onBack }) {
         polygons: modelRef.current.buildExportPolygons(),
       };
       const polygonsJson = JSON.stringify(payload);
-      await saveTierZoneMap(token, nameToBeSaved, polygonsJson);
+      await saveTierZoneMap(nameToBeSaved, polygonsJson);
       setActiveMap(nameToBeSaved);
       setNewMapName('');
       setMapStatus(`Saved "${nameToBeSaved}".`);
@@ -526,7 +525,7 @@ export default function TierPainterView({ token, onBack }) {
     setMapLoading(true);
     setMapStatus(`Loading "${mapName}"…`);
     try {
-      const data = await getTierZoneMap(token, mapName);
+      const data = await getTierZoneMap(mapName);
       const parsed = JSON.parse(data.polygonsJson);
       // Backwards compatible: old format stored raw polygons array
       if (Array.isArray(parsed)) {
@@ -587,7 +586,7 @@ export default function TierPainterView({ token, onBack }) {
     if (!window.confirm(`Delete map "${mapName}"?`)) return;
     setMapLoading(true);
     try {
-      await deleteTierZoneMap(token, mapName);
+      await deleteTierZoneMap(mapName);
       if (activeMap === mapName) setActiveMap('');
       setMapStatus(`Deleted "${mapName}".`);
       await fetchMapList();
@@ -844,7 +843,7 @@ export default function TierPainterView({ token, onBack }) {
           onContextMenu={(e) => e.preventDefault()}
         />
       </div>
-      {showImportModal && <GoogleSheetsImportView token={token} onClose={() => setShowImportModal(false)} />}
+      {showImportModal && <GoogleSheetsImportView onClose={() => setShowImportModal(false)} />}
     </div>
   );
 }

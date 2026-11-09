@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { callJson } from '../services/apiClient';
 
-export default function GoogleSheetsImportView({ token, onClose }) {
+export default function GoogleSheetsImportView({ onClose }) {
   const [status, setStatus] = useState('');
   const [savedTemplates, setSavedTemplates] = useState(() => {
     try { return JSON.parse(localStorage.getItem('google_templates') || '[]'); } catch (e) { return []; }
@@ -19,9 +19,8 @@ export default function GoogleSheetsImportView({ token, onClose }) {
   // Load server-side registered templates on mount
   useEffect(() => {
     (async () => {
-      if (!token) return;
       try {
-        const res = await callJson('/api/google/templates', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await callJson('/api/google/templates');
         if (Array.isArray(res) && res.length > 0) {
           const mapped = res.map((r) => ({ id: r.spreadsheetId, name: r.name }));
           const merged = [...mapped, ...savedTemplates.filter(s => !mapped.find(m => m.id === s.id))];
@@ -31,12 +30,12 @@ export default function GoogleSheetsImportView({ token, onClose }) {
       } catch (_) {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, []);
 
   async function linkGoogle() {
     try {
       setStatus('Opening Google consent...');
-      const res = await callJson('/api/google/login-url', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await callJson('/api/google/login-url');
       if (res?.url) {
         window.open(res.url, '_blank', 'noopener');
         setStatus('Consent opened in new tab. Complete the flow and return here.');
@@ -55,7 +54,7 @@ export default function GoogleSheetsImportView({ token, onClose }) {
       setStatus('Copying template...');
       const res = await callJson('/api/google/copy-template', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim() }),
       });
       if (res?.spreadsheetId) {
@@ -78,7 +77,7 @@ export default function GoogleSheetsImportView({ token, onClose }) {
       // register-template re-syncs the name from Google and returns the parsed JSON
       const res = await callJson('/api/google/register-template', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ spreadsheetId: template.id }),
       });
       if (!res?.parsed) { setStatus('Fetch failed.'); return; }
@@ -121,7 +120,7 @@ export default function GoogleSheetsImportView({ token, onClose }) {
       }
       const res = await callJson('/api/google/sync-crate-settings', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ spreadsheetId: selectedSheetId, crateSettings }),
       });
       const updated = res?.updated ?? [];
@@ -138,7 +137,6 @@ export default function GoogleSheetsImportView({ token, onClose }) {
     try {
       await callJson(`/api/google/templates?spreadsheetId=${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
     } catch (_) {}
     const next = savedTemplates.filter((s) => s.id !== id);
