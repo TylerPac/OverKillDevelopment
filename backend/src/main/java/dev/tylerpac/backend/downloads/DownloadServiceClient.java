@@ -70,6 +70,20 @@ public class DownloadServiceClient {
             .body(Map.of("versionId", versionId)).retrieve().body(JsonNode.class));
     }
 
+    public void deleteArtifact(String key) {
+        call(() -> {
+            rest.delete().uri("/api/artifacts/{key}", key).retrieve().toBodilessEntity();
+            return null;
+        });
+    }
+
+    public void deleteBundle(String key) {
+        call(() -> {
+            rest.delete().uri("/api/bundles/{key}", key).retrieve().toBodilessEntity();
+            return null;
+        });
+    }
+
     public JsonNode bundles() {
         return call(() -> rest.get().uri("/api/bundles").retrieve().body(JsonNode.class));
     }

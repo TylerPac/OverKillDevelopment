@@ -60,8 +60,30 @@ class ShopDownloadLinkTest {
     }
 
     @Test
+    void buyersSeeWhichPartsAreReadyAndGetALinkToEach() {
+        JsonMapper json = JsonMapper.builder().build();
+        when(downloads.bundles()).thenReturn(json.readTree("[{\"key\":\"keycard-crates-client\",\"current\":{\"id\":1}},"
+            + "{\"key\":\"keycard-crates-server\",\"current\":null},{\"key\":\"weapon-system-server\",\"current\":{\"id\":2}}]"));
+        assertEquals(java.util.Map.of("client", true, "server", false), service.downloadOptions(buyer, "keycard-crates"));
+
+        when(downloads.bundleLink("keycard-crates-server")).thenReturn(json.readTree("{\"url\":\"https://downloads.test/d/server\"}"));
+        assertEquals("https://downloads.test/d/server", service.findPartDownloadLink(buyer, "keycard-crates", "server"));
+        assertThrows(IllegalArgumentException.class, () -> service.findPartDownloadLink(buyer, "keycard-crates", "workshop"));
+    }
+
+    @Test
+    void aPartStillBuildingIsReportedAsNotReady() {
+        when(downloads.bundleLink("keycard-crates-client")).thenThrow(new DownloadServiceException(409, "bundle_not_ready"));
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+            () -> service.findPartDownloadLink(buyer, "keycard-crates", "client"));
+        assertEquals("download_not_ready", error.getMessage());
+    }
+
+    @Test
     void peopleWhoHaveNotBoughtItGetNoLink() {
         assertThrows(IllegalArgumentException.class, () -> service.findDownloadLink(buyer, "weapon-system"));
+        assertThrows(IllegalArgumentException.class, () -> service.downloadOptions(buyer, "weapon-system"));
+        assertThrows(IllegalArgumentException.class, () -> service.findPartDownloadLink(buyer, "weapon-system", "server"));
         verify(downloads, never()).bundleLink(any());
     }
 }

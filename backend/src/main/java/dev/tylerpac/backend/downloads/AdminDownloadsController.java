@@ -2,14 +2,17 @@ package dev.tylerpac.backend.downloads;
 
 import java.security.Principal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,7 +39,7 @@ public class AdminDownloadsController {
     private static final Pattern KEY = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
     private static final Pattern GITHUB = Pattern.compile("https://github\\.com/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?/?");
 
-    public record SaveFile(String displayName) {
+    public record SaveFile(String displayName, List<String> parts) {
     }
 
     public record StartUpload(String fileName, Long sizeBytes, String sha256, String note) {
@@ -89,10 +92,30 @@ public class AdminDownloadsController {
         return body;
     }
 
+    /** Creates (or renames) a file's client and/or server part. Each part is uploaded and versioned on its own. */
     @PutMapping("/files/{key}")
-    public JsonNode saveFile(Principal principal, @PathVariable String key, @RequestBody SaveFile body) {
+    public List<JsonNode> saveFile(Principal principal, @PathVariable String key, @RequestBody SaveFile body) {
         requireAdmin(principal);
-        return downloads.saveArtifact(requireKey(key), body.displayName());
+        requireKey(key);
+        if (DownloadParts.endsWithPart(key)) {
+            throw new DownloadServiceException(400, "invalid_key");
+        }
+        List<String> parts = body.parts() == null ? List.of() : body.parts().stream().distinct().toList();
+        if (parts.isEmpty() || !parts.stream().allMatch(DownloadParts::isPart)) {
+            throw new DownloadServiceException(400, "invalid_parts");
+        }
+        String name = body.displayName() == null ? "" : body.displayName().trim();
+        return parts.stream()
+            .map(part -> downloads.saveArtifact(DownloadParts.key(key, part), name + " (" + DownloadParts.label(part) + ")"))
+            .toList();
+    }
+
+    /** Deletes one part (for example "core-server") with all its versions. Refused while a product includes it. */
+    @DeleteMapping("/files/{key}")
+    public ResponseEntity<Void> deleteFile(Principal principal, @PathVariable String key) {
+        requireAdmin(principal);
+        downloads.deleteArtifact(requireKey(key));
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/files/{key}/uploads")
@@ -147,12 +170,39 @@ public class AdminDownloadsController {
         Map<String, Object> result = new LinkedHashMap<>();
         if (body.files() != null && !body.files().isEmpty()) {
             body.files().forEach(this::requireKey);
-            String fileName = StringUtils.hasText(body.fileName()) ? body.fileName().trim() : productId + ".zip";
-            Map<String, Object> bundle = new LinkedHashMap<>();
-            bundle.put("displayName", product.getName());
-            bundle.put("fileName", fileName);
-            bundle.put("artifacts", body.files());
-            result.put("bundle", downloads.saveBundle(requireKey(productId), bundle));
+            requireKey(productId);
+            Set<String> existing = new HashSet<>();
+            downloads.artifacts().forEach(artifact -> existing.add(artifact.path("key").asString("")));
+            Set<String> bundleKeys = new HashSet<>();
+            downloads.bundles().forEach(bundle -> bundleKeys.add(bundle.path("key").asString("")));
+
+            // One download per part, made of that part of each chosen file (a file without that part is left out)
+            String baseName = StringUtils.hasText(body.fileName()) ? body.fileName().trim().replaceFirst("(?i)\\.zip$", "") : productId;
+            List<JsonNode> saved = new ArrayList<>();
+            for (String part : DownloadParts.ALL) {
+                List<String> members = body.files().stream()
+                    .map(file -> DownloadParts.key(file, part))
+                    .filter(existing::contains)
+                    .toList();
+                String bundleKey = DownloadParts.key(productId, part);
+                if (!members.isEmpty()) {
+                    Map<String, Object> bundle = new LinkedHashMap<>();
+                    bundle.put("displayName", product.getName() + " (" + DownloadParts.label(part) + ")");
+                    bundle.put("fileName", baseName + "-" + DownloadParts.label(part) + ".zip");
+                    bundle.put("artifacts", members);
+                    saved.add(downloads.saveBundle(bundleKey, bundle));
+                } else if (bundleKeys.contains(bundleKey)) {
+                    downloads.deleteBundle(bundleKey);
+                }
+            }
+            if (saved.isEmpty()) {
+                throw new DownloadServiceException(400, "no_parts");
+            }
+            // A single download from before files had client and server parts
+            if (bundleKeys.contains(productId)) {
+                downloads.deleteBundle(productId);
+            }
+            result.put("bundles", saved);
         }
 
         if (githubUrl.isEmpty()) {

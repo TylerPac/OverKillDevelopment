@@ -14,6 +14,8 @@ import {
 import AdminView from './views/AdminView';
 import AuthView from './views/AuthView';
 import CartView from './views/CartView';
+import DownloadChoiceDialog from './views/DownloadChoiceDialog';
+import { getDownloadOptions } from './services/downloadsService';
 import DashboardView from './views/DashboardView';
 import HomeView from './views/HomeView';
 import { PrivacyView, RefundView, TermsView } from './views/PolicyViews';
@@ -31,6 +33,8 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  // Set when a product offers client and server downloads, which opens the choice dialog
+  const [downloadChoice, setDownloadChoice] = useState(null);
 
   const session = useSessionState((message) => {
     setProtectedData('No protected request made yet.');
@@ -481,6 +485,15 @@ export default function App() {
     setStatus('Preparing your download...');
 
     try {
+      // Products with client and server downloads let the buyer choose
+      const options = await getDownloadOptions(productId);
+      if (options?.client || options?.server) {
+        const product = products.find((p) => p.id === productId);
+        setDownloadChoice({ productId, productName: product?.name || productId, options });
+        setStatus('Choose the client or server files.');
+        return;
+      }
+
       // Try link-based download first (e.g. external URL configured per product)
       const linkUrl = await getProductDownloadLink(productId);
       if (linkUrl) {
@@ -603,6 +616,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {downloadChoice && (
+        <DownloadChoiceDialog
+          productId={downloadChoice.productId}
+          productName={downloadChoice.productName}
+          options={downloadChoice.options}
+          onClose={() => setDownloadChoice(null)}
+        />
+      )}
       {/* ── Top nav bar ──────────────────────────────────────────────── */}
       <header className="topbar">
         <button type="button" className="brand" onClick={() => setView('home')}>

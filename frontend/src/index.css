@@ -636,3 +636,13 @@ input[type='checkbox'], input[type='radio'] { min-height: 0; accent-color: var(-
 .download-product { padding: var(--space-4) 0; border-bottom: 1px solid var(--line); }
 .download-product:last-child { border-bottom: 0; }
 .download-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3) var(--space-4); }
+.data-table .group-row td { background: var(--coal-deep); border-top: 1px solid var(--line-strong); }
+
+/* Download choice (client or server files) */
+.dialog { position: fixed; width: min(520px, calc(100vw - 32px)); padding: var(--space-5); border: 1px solid var(--line-strong); border-top: 2px solid var(--red); color: var(--fog); background: var(--panel); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
+.dialog h2 { margin-top: 0; }
+.dialog-choices { display: grid; gap: var(--space-3); margin-top: var(--space-4); }
+.dialog-choices .btn { flex-direction: column; align-items: flex-start; height: auto; padding: var(--space-3) var(--space-4); text-align: left; }
+.choice-note { display: block; margin-top: var(--space-1); font: var(--text-2xs) var(--font-mono); letter-spacing: 0.04em; text-transform: none; opacity: 0.85; }
+.dialog-close { position: absolute; top: var(--space-3); right: var(--space-4); }

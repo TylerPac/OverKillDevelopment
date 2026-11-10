@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import dev.tylerpac.backend.downloads.DownloadParts;
 import dev.tylerpac.backend.downloads.DownloadServiceClient;
 import dev.tylerpac.backend.downloads.DownloadServiceException;
 import dev.tylerpac.backend.model.DownloadToken;
@@ -49,7 +50,7 @@ public class ShopDownloadService {
         this.downloads = downloads;
     }
 
-    public Optional<String> findDownloadLink(User user, String productId) {
+    private void requirePurchase(User user, String productId) {
         if (!StringUtils.hasText(user.getSteam64Id())) {
             throw new IllegalArgumentException("account_not_setup");
         }
@@ -62,6 +63,52 @@ public class ShopDownloadService {
         if (!purchased) {
             throw new IllegalArgumentException("purchase_required");
         }
+    }
+
+    /** Which downloads the buyer can choose: the client and server parts when they are ready. */
+    public java.util.Map<String, Boolean> downloadOptions(User user, String productId) {
+        requirePurchase(user, productId);
+        java.util.Map<String, Boolean> options = new java.util.LinkedHashMap<>();
+        DownloadParts.ALL.forEach(part -> options.put(part, false));
+        if (downloads.isConfigured()) {
+            try {
+                for (tools.jackson.databind.JsonNode bundle : downloads.bundles().values()) {
+                    for (String part : DownloadParts.ALL) {
+                        if (bundle.path("key").asString("").equals(DownloadParts.key(productId, part)) && !bundle.path("current").isNull()
+                            && !bundle.path("current").isMissingNode()) {
+                            options.put(part, true);
+                        }
+                    }
+                }
+            } catch (DownloadServiceException e) {
+                throw new IllegalStateException("download_unavailable");
+            }
+        }
+        return options;
+    }
+
+    /** A short-lived link to the current client or server download. */
+    public String findPartDownloadLink(User user, String productId, String part) {
+        requirePurchase(user, productId);
+        if (!DownloadParts.isPart(part)) {
+            throw new IllegalArgumentException("invalid_part");
+        }
+        try {
+            String url = downloads.bundleLink(DownloadParts.key(productId, part)).path("url").asString("");
+            if (!StringUtils.hasText(url)) {
+                throw new IllegalArgumentException("download_not_ready");
+            }
+            return url;
+        } catch (DownloadServiceException e) {
+            if (e.status() == 404 || e.status() == 409) {
+                throw new IllegalArgumentException("download_not_ready");
+            }
+            throw new IllegalStateException("download_unavailable");
+        }
+    }
+
+    public Optional<String> findDownloadLink(User user, String productId) {
+        requirePurchase(user, productId);
 
         // A product whose download is set up on the admin page: a short-lived link to its one zip
         // (the mod plus Core and API), always the current version

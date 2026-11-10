@@ -7,14 +7,17 @@ async function call(path, options = {}) {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const response = await apiFetch(path, { ...options, headers });
+  // The shop's older endpoints send their error code as plain text, the newer ones as {"error": code}
+  const text = await response.text();
   let body = null;
   try {
-    body = await response.json();
+    body = text ? JSON.parse(text) : null;
   } catch {
     body = null;
   }
   if (!response.ok) {
-    throw new Error(body?.error || `http_${response.status}`);
+    const plain = /^[a-z_]{1,64}$/.test(text.trim()) ? text.trim() : null;
+    throw new Error(body?.error || plain || `http_${response.status}`);
   }
   return body;
 }
@@ -23,11 +26,27 @@ export function getDownloadsOverview() {
   return call('/shop/admin/downloads');
 }
 
-export function saveDownloadFile(key, displayName) {
+/** Creates or renames a file's client and/or server part. */
+export function saveDownloadFile(key, displayName, parts) {
   return call(`/shop/admin/downloads/files/${encodeURIComponent(key)}`, {
     method: 'PUT',
-    body: JSON.stringify({ displayName }),
+    body: JSON.stringify({ displayName, parts }),
   });
+}
+
+/** Deletes one part (for example "core-server") with all its versions. */
+export function deleteDownloadPart(key) {
+  return call(`/shop/admin/downloads/files/${encodeURIComponent(key)}`, { method: 'DELETE' });
+}
+
+/** Which parts the signed-in buyer can download: { client: true, server: false }. */
+export function getDownloadOptions(productId) {
+  return call(`/shop/download-options/${encodeURIComponent(productId)}`);
+}
+
+export async function getPartDownloadLink(productId, part) {
+  const body = await call(`/shop/download-link/${encodeURIComponent(productId)}?part=${encodeURIComponent(part)}`);
+  return body.url;
 }
 
 export function makeVersionCurrent(key, versionId) {

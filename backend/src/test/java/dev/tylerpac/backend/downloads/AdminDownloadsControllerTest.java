@@ -121,37 +121,86 @@ class AdminDownloadsControllerTest {
     }
 
     @Test
-    void downloadServiceErrorsReachThePage() throws Exception {
-        when(downloads.saveArtifact("core", "Core")).thenThrow(new DownloadServiceException(400, "invalid_display_name"));
+    void aFileGetsAClientAndAServerPart() throws Exception {
+        when(downloads.saveArtifact(any(), any())).thenReturn(json("{}"));
         mvc.perform(put("/shop/admin/downloads/files/core").with(user(ADMIN)).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"Core\"}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error").value("invalid_display_name"));
-        mvc.perform(put("/shop/admin/downloads/files/Not_Valid").with(user(ADMIN)).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"x\"}"))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"Dev Core\",\"parts\":[\"client\",\"server\"]}"))
+            .andExpect(status().isOk());
+        verify(downloads).saveArtifact("core-client", "Dev Core (Client)");
+        verify(downloads).saveArtifact("core-server", "Dev Core (Server)");
+    }
+
+    @Test
+    void badFileKeysAndPartsAreRefused() throws Exception {
+        for (String body : List.of("{\"displayName\":\"x\",\"parts\":[]}", "{\"displayName\":\"x\",\"parts\":[\"workshop\"]}")) {
+            mvc.perform(put("/shop/admin/downloads/files/core").with(user(ADMIN)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_parts"));
+        }
+        // A base key ending in a part name would clash with another file's part
+        mvc.perform(put("/shop/admin/downloads/files/core-server").with(user(ADMIN)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"x\",\"parts\":[\"client\"]}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("invalid_key"));
+        mvc.perform(put("/shop/admin/downloads/files/Not_Valid").with(user(ADMIN)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"x\",\"parts\":[\"client\"]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("invalid_key"));
+        verify(downloads, never()).saveArtifact(any(), any());
+    }
+
+    @Test
+    void downloadServiceErrorsReachThePage() throws Exception {
+        doThrow(new DownloadServiceException(409, "artifact_in_use")).when(downloads).deleteArtifact("core-client");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/shop/admin/downloads/files/core-client")
+                .with(user(ADMIN)).with(csrf()))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("artifact_in_use"));
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void aProductsDownloadAndGithubLinkAreSaved() throws Exception {
-        when(downloads.saveBundle(eq("keycard-crates"), anyMap())).thenReturn(json("{\"key\":\"keycard-crates\",\"state\":\"BUILDING\"}"));
+    void aProductGetsAClientAndAServerDownloadFromItsFilesParts() throws Exception {
+        // keycard and core have both parts; api is server-only; an old single download exists from before parts
+        when(downloads.artifacts()).thenReturn(json("[{\"key\":\"keycard-client\"},{\"key\":\"keycard-server\"},"
+            + "{\"key\":\"core-client\"},{\"key\":\"core-server\"},{\"key\":\"api-server\"}]"));
+        when(downloads.bundles()).thenReturn(json("[{\"key\":\"keycard-crates\"}]"));
+        when(downloads.saveBundle(any(), anyMap())).thenReturn(json("{\"state\":\"BUILDING\"}"));
 
         mvc.perform(put("/shop/admin/downloads/products/keycard-crates").with(user(ADMIN)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"files\":[\"keycard\",\"core\",\"api\"],\"githubUrl\":\"https://github.com/OverKill-Dayz/KeycardCrates\"}"))
+                .content("{\"files\":[\"keycard\",\"core\",\"api\"],\"fileName\":\"KeycardCrates.zip\",\"githubUrl\":\"https://github.com/OverKill-Dayz/KeycardCrates\"}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.bundle.state").value("BUILDING"));
+            .andExpect(jsonPath("$.bundles.length()").value(2));
 
-        ArgumentCaptor<Map<String, Object>> bundle = ArgumentCaptor.forClass(Map.class);
-        verify(downloads).saveBundle(eq("keycard-crates"), bundle.capture());
-        assertEquals("KeyCard Crates", bundle.getValue().get("displayName"));
-        assertEquals("keycard-crates.zip", bundle.getValue().get("fileName"));
-        assertEquals(List.of("keycard", "core", "api"), bundle.getValue().get("artifacts"));
+        ArgumentCaptor<Map<String, Object>> client = ArgumentCaptor.forClass(Map.class);
+        verify(downloads).saveBundle(eq("keycard-crates-client"), client.capture());
+        assertEquals(List.of("keycard-client", "core-client"), client.getValue().get("artifacts"));
+        assertEquals("KeycardCrates-Client.zip", client.getValue().get("fileName"));
+        assertEquals("KeyCard Crates (Client)", client.getValue().get("displayName"));
+
+        ArgumentCaptor<Map<String, Object>> server = ArgumentCaptor.forClass(Map.class);
+        verify(downloads).saveBundle(eq("keycard-crates-server"), server.capture());
+        assertEquals(List.of("keycard-server", "core-server", "api-server"), server.getValue().get("artifacts"));
+        assertEquals("KeycardCrates-Server.zip", server.getValue().get("fileName"));
+
+        // The single download from before parts is removed
+        verify(downloads).deleteBundle("keycard-crates");
         ArgumentCaptor<ProductLink> saved = ArgumentCaptor.forClass(ProductLink.class);
         verify(links).save(saved.capture());
         assertEquals("https://github.com/OverKill-Dayz/KeycardCrates", saved.getValue().getGithubUrl());
+    }
+
+    @Test
+    void aProductWhoseFilesHaveNoPartsYetIsRefused() throws Exception {
+        when(downloads.artifacts()).thenReturn(json("[{\"key\":\"core\"}]"));
+        when(downloads.bundles()).thenReturn(json("[]"));
+        mvc.perform(put("/shop/admin/downloads/products/keycard-crates").with(user(ADMIN)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"files\":[\"core\"]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("no_parts"));
+        verify(downloads, never()).saveBundle(any(), anyMap());
     }
 
     @Test

@@ -289,10 +289,33 @@ public class ShopController {
         }
     }
 
+    /** Which parts a buyer can download: {"client": true, "server": true}. */
+    @GetMapping("/download-options/{productId}")
+    public ResponseEntity<?> getDownloadOptions(@PathVariable String productId, Principal principal) {
+        try {
+            return ResponseEntity.ok(shopDownloadService.downloadOptions(requireUser(principal), productId));
+        } catch (IllegalArgumentException ex) {
+            return switch (ex.getMessage()) {
+                case "account_not_setup", "purchase_required" ->
+                    ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+                case "invalid_product" ->
+                    ResponseEntity.badRequest().body(ex.getMessage());
+                default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
+            };
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("download_unavailable");
+        }
+    }
+
     @GetMapping("/download-link/{productId}")
-    public ResponseEntity<?> getDownloadLink(@PathVariable String productId, Principal principal) {
+    public ResponseEntity<?> getDownloadLink(@PathVariable String productId,
+                                             @RequestParam(required = false) String part,
+                                             Principal principal) {
         try {
             User user = requireUser(principal);
+            if (part != null) {
+                return ResponseEntity.ok(Map.of("url", shopDownloadService.findPartDownloadLink(user, productId, part)));
+            }
             Optional<String> link = shopDownloadService.findDownloadLink(user, productId);
             if (link.isEmpty()) {
                 return ResponseEntity.notFound().build();
@@ -302,8 +325,10 @@ public class ShopController {
             return switch (ex.getMessage()) {
                 case "account_not_setup", "purchase_required" ->
                     ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                case "invalid_product" ->
+                case "invalid_product", "invalid_part" ->
                     ResponseEntity.badRequest().body(ex.getMessage());
+                case "download_not_ready" ->
+                    ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
                 default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
             };
         } catch (IllegalStateException ex) {
