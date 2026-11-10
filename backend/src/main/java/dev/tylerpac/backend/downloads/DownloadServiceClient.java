@@ -51,9 +51,13 @@ public class DownloadServiceClient {
         return call(() -> rest.get().uri("/api/artifacts").retrieve().body(JsonNode.class));
     }
 
-    public JsonNode saveArtifact(String key, String displayName) {
+    /** bundlePath: folder for the file inside downloads when it is not a zip; null puts it at the top. */
+    public JsonNode saveArtifact(String key, String displayName, String bundlePath) {
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("displayName", displayName);
+        body.put("bundlePath", bundlePath);
         return call(() -> rest.put().uri("/api/artifacts/{key}", key).contentType(MediaType.APPLICATION_JSON)
-            .body(Map.of("displayName", displayName)).retrieve().body(JsonNode.class));
+            .body(body).retrieve().body(JsonNode.class));
     }
 
     public JsonNode startUpload(String key, Map<String, Object> request) {

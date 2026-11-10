@@ -2,8 +2,8 @@ package dev.tylerpac.backend.downloads;
 
 import java.security.Principal;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,17 +29,23 @@ import dev.tylerpac.backend.security.AdminAccess;
 import dev.tylerpac.backend.service.StripeShopService;
 import tools.jackson.databind.JsonNode;
 
-// The admin page's Downloads section. Shared files (Core, API, each mod) are uploaded once; each product says which
-// files its single download contains. Every call checks the admin with the shared login service first.
-// Uploads go from the browser straight to downloads.tylerpac.dev with the token returned by startUpload.
+// The admin page's Downloads section. A file group (Core, API, each mod) has a client and/or a server part, and each
+// part holds any number of uploaded files, placed in the standard mod layout under the group's mod folder. Each
+// product has a client and a server download made of those parts. Every call checks the admin with the shared login
+// service first. Uploads go from the browser straight to downloads.tylerpac.dev with the token from startUpload.
 @RestController
 @RequestMapping("/shop/admin/downloads")
 public class AdminDownloadsController {
 
     private static final Pattern KEY = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
     private static final Pattern GITHUB = Pattern.compile("https://github\\.com/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?/?");
+    private static final Pattern MOD_FOLDER = Pattern.compile("@?[A-Za-z0-9_.-]{1,99}");
+    private static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9@][A-Za-z0-9@._ ()+-]{0,199}");
 
-    public record SaveFile(String displayName, List<String> parts) {
+    public record SaveFile(String displayName, List<String> parts, String modFolder) {
+    }
+
+    public record AddEntry(String fileName) {
     }
 
     public record StartUpload(String fileName, Long sizeBytes, String sha256, String note) {
@@ -53,14 +59,16 @@ public class AdminDownloadsController {
 
     private final DownloadServiceClient downloads;
     private final ProductLinkRepository links;
+    private final DownloadGroupRepository groups;
     private final StripeShopService shop;
     private final UserRepository users;
     private final AdminAccess adminAccess;
 
-    public AdminDownloadsController(DownloadServiceClient downloads, ProductLinkRepository links, StripeShopService shop,
-                                    UserRepository users, AdminAccess adminAccess) {
+    public AdminDownloadsController(DownloadServiceClient downloads, ProductLinkRepository links, DownloadGroupRepository groups,
+                                    StripeShopService shop, UserRepository users, AdminAccess adminAccess) {
         this.downloads = downloads;
         this.links = links;
+        this.groups = groups;
         this.shop = shop;
         this.users = users;
         this.adminAccess = adminAccess;
@@ -80,6 +88,9 @@ public class AdminDownloadsController {
             products.add(row);
         }
         body.put("products", products);
+        Map<String, String> folders = new LinkedHashMap<>();
+        groups.findAll().forEach(group -> folders.put(group.getBaseKey(), group.getModFolder()));
+        body.put("modFolders", folders);
         body.put("configured", downloads.isConfigured());
         try {
             body.put("files", downloads.artifacts());
@@ -92,9 +103,12 @@ public class AdminDownloadsController {
         return body;
     }
 
-    /** Creates (or renames) a file's client and/or server part. Each part is uploaded and versioned on its own. */
+    /**
+     * Creates a file group's parts, or renames it and changes its mod folder. Changing the folder moves every file of
+     * the group, which rebuilds the downloads that include it.
+     */
     @PutMapping("/files/{key}")
-    public List<JsonNode> saveFile(Principal principal, @PathVariable String key, @RequestBody SaveFile body) {
+    public Map<String, Object> saveFile(Principal principal, @PathVariable String key, @RequestBody SaveFile body) {
         requireAdmin(principal);
         requireKey(key);
         if (DownloadParts.endsWithPart(key)) {
@@ -105,16 +119,69 @@ public class AdminDownloadsController {
             throw new DownloadServiceException(400, "invalid_parts");
         }
         String name = body.displayName() == null ? "" : body.displayName().trim();
-        return parts.stream()
-            .map(part -> downloads.saveArtifact(DownloadParts.key(key, part), name + " (" + DownloadParts.label(part) + ")"))
-            .toList();
+        String folder = StringUtils.hasText(body.modFolder()) ? body.modFolder().trim() : DownloadParts.defaultModFolder(name);
+        if (!MOD_FOLDER.matcher(folder).matches()) {
+            throw new DownloadServiceException(400, "invalid_mod_folder");
+        }
+        if (!folder.startsWith("@")) {
+            folder = "@" + folder;
+        }
+
+        // A group seen for the first time also places files uploaded before it had a folder
+        boolean firstTime = groups.findById(key).isEmpty();
+        DownloadGroup group = groups.findById(key).orElseGet(() -> new DownloadGroup(key, DownloadParts.defaultModFolder(name)));
+        boolean moved = firstTime || !folder.equals(group.getModFolder());
+        group.setModFolder(folder);
+        groups.save(group);
+
+        for (String part : parts) {
+            downloads.saveArtifact(DownloadParts.key(key, part), name + " (" + DownloadParts.label(part) + ")", null);
+        }
+        if (moved) {
+            placeFiles(key, folder);
+        }
+        return Map.of("key", key, "modFolder", folder);
     }
 
-    /** Deletes one part (for example "core-server") with all its versions. Refused while a product includes it. */
+    /** Adds (or returns) the entry for one uploaded file in a part; uploading the same file name again makes a new version. */
+    @PostMapping("/files/{key}/{part}/entries")
+    public Map<String, Object> addEntry(Principal principal, @PathVariable String key, @PathVariable String part,
+                                        @RequestBody AddEntry body) {
+        requireAdmin(principal);
+        requireKey(key);
+        if (!DownloadParts.isPart(part) || DownloadParts.endsWithPart(key)) {
+            throw new DownloadServiceException(400, "invalid_parts");
+        }
+        String fileName = body.fileName() == null ? "" : body.fileName().trim();
+        if (!FILE_NAME.matcher(fileName).matches() || fileName.contains("..")) {
+            throw new DownloadServiceException(400, "invalid_file_name");
+        }
+        String entryKey = DownloadParts.entryKey(key, part, fileName);
+        String folder = groups.findById(key).map(DownloadGroup::getModFolder).orElse(null);
+        downloads.saveArtifact(entryKey, fileName, DownloadParts.folderFor(folder, fileName));
+        return Map.of("key", entryKey);
+    }
+
+    /** After uploads finish: puts the group's current files into every product download that includes it. */
+    @PostMapping("/files/{key}/refresh")
+    public Map<String, Object> refresh(Principal principal, @PathVariable String key) {
+        requireAdmin(principal);
+        return Map.of("bundles", refreshProducts(requireKey(key), null));
+    }
+
+    /**
+     * Deletes one uploaded file (or a whole old single file) with all its versions. Product downloads that include
+     * it are rebuilt without it first.
+     */
     @DeleteMapping("/files/{key}")
     public ResponseEntity<Void> deleteFile(Principal principal, @PathVariable String key) {
         requireAdmin(principal);
-        downloads.deleteArtifact(requireKey(key));
+        requireKey(key);
+        DownloadParts.Parsed parsed = DownloadParts.parse(key);
+        if (parsed != null) {
+            refreshProducts(parsed.base(), key);
+        }
+        downloads.deleteArtifact(key);
         return ResponseEntity.noContent().build();
     }
 
@@ -153,7 +220,7 @@ public class AdminDownloadsController {
         return downloads.setCurrent(requireKey(key), body.versionId());
     }
 
-    /** Which files make up a product's download, its file name, and its GitHub link. */
+    /** Which file groups make up a product's client and server downloads, their file names, and its GitHub link. */
     @PutMapping("/products/{productId}")
     public Map<String, Object> saveProduct(Principal principal, @PathVariable String productId, @RequestBody SaveProduct body) {
         requireAdmin(principal);
@@ -171,26 +238,17 @@ public class AdminDownloadsController {
         if (body.files() != null && !body.files().isEmpty()) {
             body.files().forEach(this::requireKey);
             requireKey(productId);
-            Set<String> existing = new HashSet<>();
-            downloads.artifacts().forEach(artifact -> existing.add(artifact.path("key").asString("")));
-            Set<String> bundleKeys = new HashSet<>();
-            downloads.bundles().forEach(bundle -> bundleKeys.add(bundle.path("key").asString("")));
+            JsonNode artifacts = downloads.artifacts();
+            Set<String> bundleKeys = new LinkedHashSet<>();
+            downloads.bundles().values().forEach(bundle -> bundleKeys.add(bundle.path("key").asString("")));
 
-            // One download per part, made of that part of each chosen file (a file without that part is left out)
             String baseName = StringUtils.hasText(body.fileName()) ? body.fileName().trim().replaceFirst("(?i)\\.zip$", "") : productId;
             List<JsonNode> saved = new ArrayList<>();
             for (String part : DownloadParts.ALL) {
-                List<String> members = body.files().stream()
-                    .map(file -> DownloadParts.key(file, part))
-                    .filter(existing::contains)
-                    .toList();
+                List<String> members = expand(artifacts, body.files(), part, null);
                 String bundleKey = DownloadParts.key(productId, part);
                 if (!members.isEmpty()) {
-                    Map<String, Object> bundle = new LinkedHashMap<>();
-                    bundle.put("displayName", product.getName() + " (" + DownloadParts.label(part) + ")");
-                    bundle.put("fileName", baseName + "-" + DownloadParts.label(part) + ".zip");
-                    bundle.put("artifacts", members);
-                    saved.add(downloads.saveBundle(bundleKey, bundle));
+                    saved.add(downloads.saveBundle(bundleKey, bundleRequest(product.getName(), baseName, part, members)));
                 } else if (bundleKeys.contains(bundleKey)) {
                     downloads.deleteBundle(bundleKey);
                 }
@@ -216,6 +274,108 @@ public class AdminDownloadsController {
         return result;
     }
 
+    // ---- helpers --------------------------------------------------------------------------------------
+
+    /**
+     * The current files of each chosen group's part, in the chosen order: the part's own old single file first, then
+     * its uploaded files by name. Files with no finished upload are left out, so an upload in progress never breaks
+     * a download. skip leaves out one file that is about to be deleted.
+     */
+    static List<String> expand(JsonNode artifacts, List<String> bases, String part, String skip) {
+        List<String> members = new ArrayList<>();
+        for (String base : bases) {
+            List<String> entries = new ArrayList<>();
+            String own = null;
+            for (JsonNode artifact : artifacts.values()) {
+                String key = artifact.path("key").asString("");
+                DownloadParts.Parsed parsed = DownloadParts.parse(key);
+                boolean uploaded = !artifact.path("currentVersionId").isNull() && !artifact.path("currentVersionId").isMissingNode();
+                if (parsed == null || !parsed.base().equals(base) || !parsed.part().equals(part) || !uploaded || key.equals(skip)) {
+                    continue;
+                }
+                if (parsed.entry() == null) {
+                    own = key;
+                } else {
+                    entries.add(key);
+                }
+            }
+            if (own != null) {
+                members.add(own);
+            }
+            entries.stream().sorted().forEach(members::add);
+        }
+        return members;
+    }
+
+    /** Rebuilds the member lists of every product download that includes this group (optionally without one file). */
+    private List<JsonNode> refreshProducts(String base, String skip) {
+        JsonNode artifacts = downloads.artifacts();
+        List<JsonNode> saved = new ArrayList<>();
+        for (JsonNode bundle : downloads.bundles().values()) {
+            String bundleKey = bundle.path("key").asString("");
+            DownloadParts.Parsed parsed = DownloadParts.parse(bundleKey);
+            if (parsed == null || parsed.entry() != null) {
+                continue;
+            }
+            List<String> bases = new ArrayList<>();
+            for (JsonNode member : bundle.path("artifacts").values()) {
+                DownloadParts.Parsed memberParsed = DownloadParts.parse(member.asString(""));
+                if (memberParsed != null && !bases.contains(memberParsed.base())) {
+                    bases.add(memberParsed.base());
+                }
+            }
+            if (!bases.contains(base)) {
+                continue;
+            }
+            List<String> members = expand(artifacts, bases, parsed.part(), skip);
+            List<String> current = new ArrayList<>();
+            bundle.path("artifacts").values().forEach(member -> current.add(member.asString("")));
+            if (members.equals(current)) {
+                continue;
+            }
+            if (members.isEmpty()) {
+                downloads.deleteBundle(bundleKey);
+                continue;
+            }
+            String fileName = bundle.path("fileName").asString(bundleKey + ".zip");
+            String displayName = bundle.path("displayName").asString(bundleKey);
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("displayName", displayName);
+            request.put("fileName", fileName);
+            request.put("artifacts", members);
+            saved.add(downloads.saveBundle(bundleKey, request));
+        }
+        return saved;
+    }
+
+    /** Puts every file of the group in its place under a new mod folder. */
+    private void placeFiles(String base, String folder) {
+        for (JsonNode artifact : downloads.artifacts().values()) {
+            String key = artifact.path("key").asString("");
+            DownloadParts.Parsed parsed = DownloadParts.parse(key);
+            if (parsed == null || !parsed.base().equals(base)) {
+                continue;
+            }
+            // The file's own name is in its newest version (an old single file) or its display name (an entry)
+            JsonNode versions = artifact.path("versions");
+            String fileName = parsed.entry() == null
+                ? (versions.isArray() && !versions.isEmpty() ? versions.get(0).path("fileName").asString("") : "")
+                : artifact.path("displayName").asString("");
+            if (parsed.entry() == null && fileName.isEmpty()) {
+                continue;
+            }
+            downloads.saveArtifact(key, artifact.path("displayName").asString(key), DownloadParts.folderFor(folder, fileName));
+        }
+    }
+
+    private static Map<String, Object> bundleRequest(String productName, String baseName, String part, List<String> members) {
+        Map<String, Object> bundle = new LinkedHashMap<>();
+        bundle.put("displayName", productName + " (" + DownloadParts.label(part) + ")");
+        bundle.put("fileName", baseName + "-" + DownloadParts.label(part) + ".zip");
+        bundle.put("artifacts", members);
+        return bundle;
+    }
+
     // ---- errors ---------------------------------------------------------------------------------------
 
     @ExceptionHandler(DownloadServiceException.class)
@@ -228,8 +388,6 @@ public class AdminDownloadsController {
         HttpStatus status = "unauthorized".equals(e.getMessage()) ? HttpStatus.UNAUTHORIZED : HttpStatus.FORBIDDEN;
         return ResponseEntity.status(status).body(Map.of("error", status == HttpStatus.UNAUTHORIZED ? "unauthorized" : "forbidden"));
     }
-
-    // ---- helpers --------------------------------------------------------------------------------------
 
     /** The admin's Steam id; 401 when signed out, 403 when not an admin, 503 when the login service is down. */
     private String requireAdmin(Principal principal) {

@@ -26,12 +26,25 @@ export function getDownloadsOverview() {
   return call('/shop/admin/downloads');
 }
 
-/** Creates or renames a file's client and/or server part. */
-export function saveDownloadFile(key, displayName, parts) {
+/** Creates or renames a file group's client and/or server part, and sets its mod folder. */
+export function saveDownloadFile(key, displayName, parts, modFolder) {
   return call(`/shop/admin/downloads/files/${encodeURIComponent(key)}`, {
     method: 'PUT',
-    body: JSON.stringify({ displayName, parts }),
+    body: JSON.stringify({ displayName, parts, modFolder }),
   });
+}
+
+/** The entry for one file in a part (the same file name always gives the same entry). */
+export function addDownloadEntry(key, part, fileName) {
+  return call(`/shop/admin/downloads/files/${encodeURIComponent(key)}/${part}/entries`, {
+    method: 'POST',
+    body: JSON.stringify({ fileName }),
+  });
+}
+
+/** After uploads finish: puts the group's current files into every product download that includes it. */
+export function refreshDownloadGroup(key) {
+  return call(`/shop/admin/downloads/files/${encodeURIComponent(key)}/refresh`, { method: 'POST' });
 }
 
 /** Deletes one part (for example "core-server") with all its versions. */
