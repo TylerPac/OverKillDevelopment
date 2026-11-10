@@ -4,7 +4,6 @@ import dev.tylerpac.backend.security.AdminAccess;
 
 import java.security.Principal;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,10 +32,6 @@ import com.stripe.exception.StripeException;
 import dev.tylerpac.backend.dto.CreateCartCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionRequest;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
-import dev.tylerpac.backend.dto.CreateFullAccessCodeRequest;
-import dev.tylerpac.backend.dto.CreateFullAccessCodeResponse;
-import dev.tylerpac.backend.dto.RedeemFullAccessCodeRequest;
-import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
 import dev.tylerpac.backend.dto.SubscriptionStatusResponse;
@@ -77,65 +72,6 @@ public class ShopController {
     @GetMapping("/products")
     public ResponseEntity<List<ShopProductResponse>> products() {
         return ResponseEntity.ok(stripeShopService.getProducts());
-    }
-
-    @PostMapping("/access-codes/full-unlock")
-    public ResponseEntity<?> createFullAccessCode(
-        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
-        @RequestHeader(value = "X-Shop-Admin-Token", required = false) String adminToken
-    ) {
-        try {
-            String requestedCode = request != null ? request.getCode() : null;
-            CreateFullAccessCodeResponse response = stripeShopService.createFullAccessCode(requestedCode, adminToken);
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "invalid_admin_token" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
-        } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
-        }
-    }
-
-    @PostMapping("/access-codes/create")
-    public ResponseEntity<?> createAccessCode(
-        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
-        @RequestHeader(value = "X-Shop-Admin-Token", required = false) String adminToken
-    ) {
-        try {
-            String requestedCode = request != null ? request.getCode() : null;
-            List<String> productIds = request != null ? request.getProductIds() : null;
-            CreateFullAccessCodeResponse response = stripeShopService.createAccessCode(requestedCode, productIds, adminToken);
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "invalid_admin_token" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
-        } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ex.getMessage());
-        }
-    }
-
-    @PostMapping("/access-codes/redeem")
-    public ResponseEntity<?> redeemFullAccessCode(
-        @Valid @RequestBody RedeemFullAccessCodeRequest request,
-        Principal principal
-    ) {
-        try {
-            User user = requireUser(principal);
-            if (!StringUtils.hasText(user.getSteam64Id())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("account_not_setup");
-            }
-            RedeemFullAccessCodeResponse response = stripeShopService.redeemFullAccessCode(user, request.getCode());
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "account_not_setup" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
-        }
     }
 
     @PostMapping("/checkout-session")
@@ -429,85 +365,56 @@ public class ShopController {
 
     // ── Admin endpoints (JWT-authenticated, Steam admin only) ────────────────
 
-    @GetMapping("/admin/codes")
-    public ResponseEntity<?> adminListCodes(Principal principal) {
+    /** Body for giving products to a Steam account. */
+    public record GrantRequest(String steamId, List<String> productIds) {
+    }
+
+    @GetMapping("/admin/grants")
+    public ResponseEntity<?> adminListGrants(Principal principal) {
         try {
             requireAdminUser(principal);
-            return ResponseEntity.ok(stripeShopService.listAllAccessCodes());
+            return ResponseEntity.ok(stripeShopService.listGrants());
         } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
+            return adminError(ex);
         }
     }
 
-    @PostMapping("/admin/codes/full-unlock")
-    public ResponseEntity<?> adminCreateFullUnlockCode(
-        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
-        Principal principal
-    ) {
+    @PostMapping("/admin/grants")
+    public ResponseEntity<?> adminGrant(@RequestBody(required = false) GrantRequest request, Principal principal) {
         try {
-            requireAdminUser(principal);
-            String requestedCode = request != null ? request.getCode() : null;
-            CreateFullAccessCodeResponse response = stripeShopService.createAccessCodeTrusted(requestedCode, Collections.emptyList());
-            return ResponseEntity.ok(response);
+            User admin = requireAdminUser(principal);
+            if (request == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "invalid_steam_id"));
+            }
+            return ResponseEntity.ok(stripeShopService.grantProducts(request.steamId(), request.productIds(), admin.getSteam64Id()));
         } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
+            return adminError(ex);
         }
     }
 
-    @PostMapping("/admin/codes/create")
-    public ResponseEntity<?> adminCreateCode(
-        @RequestBody(required = false) @Valid CreateFullAccessCodeRequest request,
-        Principal principal
-    ) {
+    @PostMapping("/admin/grants/{orderId}/revoke")
+    public ResponseEntity<?> adminRevokeGrant(@PathVariable Long orderId, Principal principal) {
         try {
-            requireAdminUser(principal);
-            String requestedCode = request != null ? request.getCode() : null;
-            List<String> productIds = request != null ? request.getProductIds() : null;
-            CreateFullAccessCodeResponse response = stripeShopService.createAccessCodeTrusted(requestedCode, productIds);
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
-        }
-    }
-
-    @PostMapping("/admin/codes/{id}/revoke")
-    public ResponseEntity<?> adminRevokeCode(@PathVariable Long id, Principal principal) {
-        try {
-            requireAdminUser(principal);
-            stripeShopService.revokeAccessCode(id);
+            User admin = requireAdminUser(principal);
+            stripeShopService.revokeGrant(orderId, admin.getSteam64Id());
             return ResponseEntity.ok(Map.of("revoked", true));
         } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                case "access_code_not_found" -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
+            return adminError(ex);
         }
     }
 
-    @DeleteMapping("/admin/codes/{id}")
-    public ResponseEntity<?> adminDeleteCode(@PathVariable Long id, Principal principal) {
-        try {
-            requireAdminUser(principal);
-            stripeShopService.deleteAccessCode(id);
-            return ResponseEntity.ok(Map.of("deleted", true));
-        } catch (IllegalArgumentException ex) {
-            return switch (ex.getMessage()) {
-                case "unauthorized", "forbidden" -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
-                case "access_code_not_found" -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-                case "access_code_not_revoked" -> ResponseEntity.badRequest().body(ex.getMessage());
-                default -> ResponseEntity.badRequest().body(ex.getMessage());
-            };
+    private ResponseEntity<Map<String, String>> adminError(IllegalArgumentException ex) {
+        String code = ex.getMessage() == null ? "bad_request" : ex.getMessage();
+        HttpStatus status = switch (code) {
+            case "unauthorized", "forbidden" -> HttpStatus.FORBIDDEN;
+            case "grant_not_found" -> HttpStatus.NOT_FOUND;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        if (code.startsWith("invalid_product")) {
+            code = "invalid_product";
         }
+        // "message" is what the site shows when a request fails
+        return ResponseEntity.status(status).body(Map.of("error", code, "message", code));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

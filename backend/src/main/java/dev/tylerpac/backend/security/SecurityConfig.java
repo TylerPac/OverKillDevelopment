@@ -39,10 +39,10 @@ public class SecurityConfig {
 
     private static final String REGISTRATION_ID = "shared";
 
-    // These do not use the browser session: Stripe, game servers and the admin-token endpoints authenticate
+    // These do not use the browser session: Stripe and game servers authenticate
     // each request themselves, so a CSRF token would protect nothing and they could never send one.
     private static final String[] NO_SESSION_POSTS = {
-        "/api/dayz/**", "/shop/webhook", "/shop/access-codes/full-unlock", "/shop/access-codes/create"
+        "/api/dayz/**", "/shop/webhook"
     };
 
     @Value("${app.allowed-origins:http://localhost:5173}")
@@ -101,7 +101,7 @@ public class SecurityConfig {
             // A session cookie is sent automatically, so state-changing requests need a CSRF token
             .csrf(csrf -> csrf.spa().ignoringRequestMatchers(NO_SESSION_POSTS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**", "/api/google/**", "/api/dayz/**", "/actuator/**", "/shop/webhook", "/shop/products", "/shop/product-links", "/shop/access-codes/full-unlock", "/shop/access-codes/create", "/shop/download-stream").permitAll()
+                .requestMatchers("/auth/**", "/api/google/**", "/api/dayz/**", "/actuator/**", "/shop/webhook", "/shop/products", "/shop/product-links", "/shop/download-stream").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

@@ -1,16 +1,12 @@
 package dev.tylerpac.backend.service;
 
-import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,20 +33,16 @@ import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 
-import dev.tylerpac.backend.dto.AccessCodeAdminResponse;
 import dev.tylerpac.backend.dto.CreateCheckoutSessionResponse;
-import dev.tylerpac.backend.dto.CreateFullAccessCodeResponse;
-import dev.tylerpac.backend.dto.RedeemFullAccessCodeResponse;
+import dev.tylerpac.backend.dto.ProductGrantResponse;
 import dev.tylerpac.backend.dto.ShopOrderResponse;
 import dev.tylerpac.backend.dto.ShopProductResponse;
 import dev.tylerpac.backend.model.ProcessedStripeEvent;
-import dev.tylerpac.backend.model.ShopAccessCode;
 import dev.tylerpac.backend.model.ShopOrder;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.repo.DownloadTokenRepository;
 import dev.tylerpac.backend.repo.ProcessedStripeEventRepository;
 import dev.tylerpac.backend.repo.ProductReleaseRepository;
-import dev.tylerpac.backend.repo.ShopAccessCodeRepository;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserRepository;
 
@@ -64,10 +56,12 @@ public class StripeShopService {
     private static final String STATUS_PAID = "PAID";
     private static final String STATUS_FAILED = "FAILED";
     private static final String STATUS_EXPIRED = "EXPIRED";
-    private static final String ACCESS_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    private static final SecureRandom ACCESS_CODE_RANDOM = new SecureRandom();
+    private static final String STATUS_REVOKED = "REVOKED";
+    // Free orders an admin gave out are marked by their session id. "promo:" orders came from the old access codes.
+    private static final String GRANT_PREFIX = "grant:";
+    private static final String LEGACY_CODE_PREFIX = "promo:";
+    private static final String STEAM_ID = "7656119\\d{10}";
 
-    private final ShopAccessCodeRepository shopAccessCodeRepository;
     private final ShopOrderRepository shopOrderRepository;
     private final ProcessedStripeEventRepository processedStripeEventRepository;
     private final DownloadTokenRepository downloadTokenRepository;
@@ -80,10 +74,8 @@ public class StripeShopService {
     private final String cancelUrl;
     private final String webhookSecret;
     private final String premiumPriceId;
-    private final String shopAdminToken;
 
     public StripeShopService(
-        ShopAccessCodeRepository shopAccessCodeRepository,
         ShopOrderRepository shopOrderRepository,
         ProcessedStripeEventRepository processedStripeEventRepository,
         DownloadTokenRepository downloadTokenRepository,
@@ -94,12 +86,10 @@ public class StripeShopService {
         @Value("${app.shop.currency:usd}") String currency,
         @Value("${app.shop.success-url}") String successUrl,
         @Value("${app.shop.cancel-url}") String cancelUrl,
-        @Value("${app.shop.admin-token:}") String shopAdminToken,
         @Value("${app.stripe.secret-key:}") String stripeSecretKey,
         @Value("${app.stripe.webhook-secret:}") String webhookSecret,
         @Value("${app.stripe.premium-price-id:}") String premiumPriceId
     ) {
-        this.shopAccessCodeRepository = shopAccessCodeRepository;
         this.shopOrderRepository = shopOrderRepository;
         this.processedStripeEventRepository = processedStripeEventRepository;
         this.downloadTokenRepository = downloadTokenRepository;
@@ -110,7 +100,6 @@ public class StripeShopService {
         this.currency = currency;
         this.successUrl = normalizeCheckoutBaseUrl(successUrl);
         this.cancelUrl = normalizeCheckoutBaseUrl(cancelUrl);
-        this.shopAdminToken = shopAdminToken;
         this.webhookSecret = webhookSecret;
         this.premiumPriceId = premiumPriceId;
 
@@ -137,170 +126,30 @@ public class StripeShopService {
         return List.copyOf(catalog().values());
     }
 
+    /**
+     * Gives products to a Steam account for free, as paid orders worth nothing. The account is created if that
+     * player has never signed in, exactly as their first sign-in would create it. Products they already own are
+     * skipped.
+     */
     @Transactional
-    public CreateFullAccessCodeResponse createAccessCode(String requestedCode, List<String> requestedProductIds, String adminToken) {
-        requireAdminToken(adminToken);
-
-        String normalizedCode = normalizeAccessCode(requestedCode, true);
-        if (!StringUtils.hasText(normalizedCode)) {
-            normalizedCode = generateUniqueAccessCode();
+    public ProductGrantResponse.Result grantProducts(String steamId, List<String> productIds, String grantedBySteamId) {
+        String target = steamId == null ? "" : steamId.trim();
+        if (!target.matches(STEAM_ID)) {
+            throw new IllegalArgumentException("invalid_steam_id");
+        }
+        List<ShopProductResponse> products = resolveScopedProducts(productIds);
+        if (products.isEmpty()) {
+            throw new IllegalArgumentException("product_ids_required");
         }
 
-        if (shopAccessCodeRepository.existsByCode(normalizedCode)) {
-            throw new IllegalArgumentException("code_already_exists");
-        }
-
-        List<ShopProductResponse> scopedProducts = resolveScopedProducts(requestedProductIds);
-        boolean fullAccess = scopedProducts.isEmpty();
-
-        ShopAccessCode accessCode = new ShopAccessCode();
-        accessCode.setCode(normalizedCode);
-        accessCode.setFullAccess(fullAccess);
-        accessCode.setProductIdsCsv(fullAccess
-            ? null
-            : scopedProducts.stream().map(ShopProductResponse::getId).collect(Collectors.joining(",")));
-
-        try {
-            shopAccessCodeRepository.save(accessCode);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalArgumentException("code_already_exists");
-        }
-
-        List<String> scopedProductIds = fullAccess
-            ? List.of()
-            : scopedProducts.stream().map(ShopProductResponse::getId).toList();
-
-        return new CreateFullAccessCodeResponse(
-            normalizedCode,
-            true,
-            fullAccess,
-            scopedProductIds,
-            fullAccess ? getProducts().size() : scopedProductIds.size()
-        );
-    }
-
-    @Transactional
-    public CreateFullAccessCodeResponse createFullAccessCode(String requestedCode, String adminToken) {
-        return createAccessCode(requestedCode, Collections.emptyList(), adminToken);
-    }
-
-    /** Creates an access code without the admin-token check — for use by JWT-authenticated admin endpoints only. */
-    @Transactional
-    public CreateFullAccessCodeResponse createAccessCodeTrusted(String requestedCode, List<String> requestedProductIds) {
-        String normalizedCode = normalizeAccessCode(requestedCode, true);
-        if (!StringUtils.hasText(normalizedCode)) {
-            normalizedCode = generateUniqueAccessCode();
-        }
-
-        if (shopAccessCodeRepository.existsByCode(normalizedCode)) {
-            throw new IllegalArgumentException("code_already_exists");
-        }
-
-        List<ShopProductResponse> scopedProducts = resolveScopedProducts(requestedProductIds);
-        boolean fullAccess = scopedProducts.isEmpty();
-
-        ShopAccessCode accessCode = new ShopAccessCode();
-        accessCode.setCode(normalizedCode);
-        accessCode.setFullAccess(fullAccess);
-        accessCode.setProductIdsCsv(fullAccess
-            ? null
-            : scopedProducts.stream().map(ShopProductResponse::getId).collect(Collectors.joining(",")));
-
-        try {
-            shopAccessCodeRepository.save(accessCode);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalArgumentException("code_already_exists");
-        }
-
-        List<String> scopedProductIds = fullAccess
-            ? List.of()
-            : scopedProducts.stream().map(ShopProductResponse::getId).toList();
-
-        return new CreateFullAccessCodeResponse(
-            normalizedCode,
-            true,
-            fullAccess,
-            scopedProductIds,
-            fullAccess ? getProducts().size() : scopedProductIds.size()
-        );
-    }
-
-    @Transactional(readOnly = true)
-    public List<AccessCodeAdminResponse> listAllAccessCodes() {
-        return shopAccessCodeRepository.findAllByOrderByCreatedAtDesc().stream()
-            .map(ac -> {
-                List<String> productIds = (ac.getProductIdsCsv() != null && !ac.getProductIdsCsv().isBlank())
-                    ? List.of(ac.getProductIdsCsv().split(","))
-                    : List.of();
-                String redeemedByUsername = ac.getRedeemedByUser() != null
-                    ? ac.getRedeemedByUser().getUsername() : null;
-                String redeemedAt = ac.getRedeemedAt() != null
-                    ? ac.getRedeemedAt().toString() : null;
-                return new AccessCodeAdminResponse(
-                    ac.getId(),
-                    ac.getCode(),
-                    ac.isFullAccess(),
-                    productIds,
-                    ac.getRedeemedAt() != null,
-                    redeemedByUsername,
-                    redeemedAt,
-                    ac.isRevoked(),
-                    ac.getCreatedAt().toString()
-                );
-            })
-            .toList();
-    }
-
-    @Transactional
-    public void revokeAccessCode(Long id) {
-        ShopAccessCode accessCode = shopAccessCodeRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("access_code_not_found"));
-        accessCode.setRevoked(true);
-        shopAccessCodeRepository.save(accessCode);
-    }
-
-    @Transactional
-    public void deleteAccessCode(Long id) {
-        ShopAccessCode accessCode = shopAccessCodeRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("access_code_not_found"));
-        if (!accessCode.isRevoked()) {
-            throw new IllegalArgumentException("access_code_not_revoked");
-        }
-        shopAccessCodeRepository.delete(accessCode);
-    }
-
-    @Transactional
-    public RedeemFullAccessCodeResponse redeemFullAccessCode(User user, String rawCode) {
-        String code = normalizeAccessCode(rawCode, false);
-        ShopAccessCode accessCode = shopAccessCodeRepository.findByCode(code)
-            .orElseThrow(() -> new IllegalArgumentException("invalid_access_code"));
-
-        if (accessCode.isRevoked()) {
-            throw new IllegalArgumentException("invalid_access_code");
-        }
-
-        if (accessCode.getRedeemedAt() != null) {
-            throw new IllegalArgumentException("access_code_already_redeemed");
-        }
-
-        List<ShopProductResponse> scopedProducts = accessCode.isFullAccess()
-            ? getProducts()
-            : resolveScopedProductsFromCode(accessCode);
-
-        List<ShopProductResponse> productsToGrant = new ArrayList<>();
-        for (ShopProductResponse product : scopedProducts) {
-            boolean alreadyOwned = shopOrderRepository.existsByUserAndProductIdAndStatusIgnoreCase(user, product.getId(), STATUS_PAID);
-            if (!alreadyOwned) {
-                productsToGrant.add(product);
+        User user = findOrCreateSteamUser(target);
+        List<String> granted = new ArrayList<>();
+        List<String> alreadyOwned = new ArrayList<>();
+        for (ShopProductResponse product : products) {
+            if (shopOrderRepository.existsByUserAndProductIdAndStatusIgnoreCase(user, product.getId(), STATUS_PAID)) {
+                alreadyOwned.add(product.getId());
+                continue;
             }
-        }
-
-        if (productsToGrant.isEmpty()) {
-            throw new IllegalArgumentException("nothing_to_redeem");
-        }
-
-        List<String> grantedProductIds = new ArrayList<>();
-        for (ShopProductResponse product : productsToGrant) {
             ShopOrder order = new ShopOrder();
             order.setUser(user);
             order.setProductId(product.getId());
@@ -308,20 +157,61 @@ public class StripeShopService {
             order.setAmountCents(0L);
             order.setCurrency(product.getCurrency());
             order.setStatus(STATUS_PAID);
-            order.setStripeCheckoutSessionId("promo:" + accessCode.getId() + ":" + product.getId());
-            order.setStripePaymentIntentId("promo:" + accessCode.getId());
+            order.setStripeCheckoutSessionId(GRANT_PREFIX + UUID.randomUUID());
+            order.setStripePaymentIntentId(GRANT_PREFIX + grantedBySteamId);
             shopOrderRepository.save(order);
-
             purchaseEmailService.sendOrderPaid(user, order);
             gitHubRepoService.grantRepoAccess(user.getGithubUsername(), product.getId());
-            grantedProductIds.add(product.getId());
+            granted.add(product.getId());
         }
+        log.info("Admin {} granted {} to {} ({} already owned)", grantedBySteamId, granted, target, alreadyOwned.size());
+        return new ProductGrantResponse.Result(target, granted, alreadyOwned);
+    }
 
-        accessCode.setRedeemedByUser(user);
-        accessCode.setRedeemedAt(Instant.now());
-        shopAccessCodeRepository.save(accessCode);
+    /** Every free order an admin gave out, plus those redeemed from the old access codes, newest first. */
+    @Transactional(readOnly = true)
+    public List<ProductGrantResponse> listGrants() {
+        List<ShopOrder> orders = new ArrayList<>(shopOrderRepository.findByStripeCheckoutSessionIdStartingWith(GRANT_PREFIX));
+        orders.addAll(shopOrderRepository.findByStripeCheckoutSessionIdStartingWith(LEGACY_CODE_PREFIX));
+        return orders.stream()
+            .sorted(java.util.Comparator.comparing(ShopOrder::getCreatedAt, java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+            .map(order -> new ProductGrantResponse(
+                order.getId(),
+                order.getUser().getSteam64Id(),
+                order.getUser().getUsername(),
+                order.getProductId(),
+                order.getProductName(),
+                order.getStripeCheckoutSessionId().startsWith(GRANT_PREFIX) ? "grant" : "code",
+                order.getStripePaymentIntentId() != null && order.getStripePaymentIntentId().startsWith(GRANT_PREFIX)
+                    ? order.getStripePaymentIntentId().substring(GRANT_PREFIX.length()) : null,
+                order.getStatus(),
+                order.getCreatedAt() == null ? null : order.getCreatedAt().toString()))
+            .toList();
+    }
 
-        return new RedeemFullAccessCodeResponse(grantedProductIds.size(), grantedProductIds);
+    /** Takes a free product back. Only free orders can be revoked here; paid orders are refunded through Stripe. */
+    @Transactional
+    public void revokeGrant(Long orderId, String revokedBySteamId) {
+        ShopOrder order = shopOrderRepository.findById(orderId)
+            .orElseThrow(() -> new IllegalArgumentException("grant_not_found"));
+        String sessionId = order.getStripeCheckoutSessionId();
+        if (sessionId == null || !(sessionId.startsWith(GRANT_PREFIX) || sessionId.startsWith(LEGACY_CODE_PREFIX))) {
+            throw new IllegalArgumentException("grant_not_found");
+        }
+        order.setStatus(STATUS_REVOKED);
+        shopOrderRepository.save(order);
+        log.info("Admin {} revoked {} from {}", revokedBySteamId, order.getProductId(), order.getUser().getSteam64Id());
+    }
+
+    private User findOrCreateSteamUser(String steamId) {
+        return userRepository.findBySteam64Id(steamId).orElseGet(() -> {
+            try {
+                return userRepository.saveAndFlush(User.fromSteamAccount(steamId));
+            } catch (DataIntegrityViolationException e) {
+                // The player signed in at the same moment
+                return userRepository.findBySteam64Id(steamId).orElseThrow(() -> e);
+            }
+        });
     }
 
     @Transactional
@@ -339,6 +229,7 @@ public class StripeShopService {
         SessionCreateParams params = SessionCreateParams.builder()
             .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
             .setCustomer(customerId)
+            .setAllowPromotionCodes(true)
             .setSuccessUrl(successUrl + "?subscription=success&session_id={CHECKOUT_SESSION_ID}")
             .setCancelUrl(cancelUrl + "?subscription=cancel")
             .setClientReferenceId(String.valueOf(user.getId()))
@@ -441,6 +332,7 @@ public class StripeShopService {
         SessionCreateParams params = SessionCreateParams.builder()
             .setMode(SessionCreateParams.Mode.PAYMENT)
             .setCustomer(customerId)
+            .setAllowPromotionCodes(true)
             .setSuccessUrl(successUrl + "?checkout=success&session_id={CHECKOUT_SESSION_ID}")
             .setCancelUrl(cancelUrl + "?checkout=cancel")
             .setClientReferenceId(String.valueOf(user.getId()))
@@ -504,6 +396,7 @@ public class StripeShopService {
         SessionCreateParams.Builder sessionBuilder = SessionCreateParams.builder()
             .setMode(SessionCreateParams.Mode.PAYMENT)
             .setCustomer(customerId)
+            .setAllowPromotionCodes(true)
             .setSuccessUrl(successUrl + "?checkout=success&session_id={CHECKOUT_SESSION_ID}")
             .setCancelUrl(cancelUrl + "?checkout=cancel")
             .setClientReferenceId(String.valueOf(user.getId()))
@@ -583,7 +476,7 @@ public class StripeShopService {
         }
 
         String nextStatus = null;
-        if ("paid".equalsIgnoreCase(session.getPaymentStatus())) {
+        if (isSettled(session)) {
             nextStatus = STATUS_PAID;
         } else if ("expired".equalsIgnoreCase(session.getStatus())) {
             nextStatus = STATUS_EXPIRED;
@@ -647,7 +540,10 @@ public class StripeShopService {
                             updateUserSubscriptionFromCheckoutSession(session);
                         }
                         Map<String, String> meta = session.getMetadata();
-                        if (meta != null && "true".equals(meta.get("cartCheckout"))) {
+                        if (!isSettled(session)) {
+                            // Not paid yet (a delayed payment method); reconciliation or the buyer's return picks it up
+                            log.info("Checkout {} completed with payment status {}", session.getId(), session.getPaymentStatus());
+                        } else if (meta != null && "true".equals(meta.get("cartCheckout"))) {
                             createCartOrdersFromSession(session);
                         } else {
                             updateOrderFromCheckoutSession(session, STATUS_PAID);
@@ -695,7 +591,7 @@ public class StripeShopService {
         for (ShopOrder order : pendingOrders) {
             try {
                 Session session = Session.retrieve(order.getStripeCheckoutSessionId());
-                if ("paid".equalsIgnoreCase(session.getPaymentStatus())) {
+                if (isSettled(session)) {
                     markStatus(order, STATUS_PAID);
                     continue;
                 }
@@ -718,6 +614,12 @@ public class StripeShopService {
                 // keep pending and retry on the next reconciliation cycle
             }
         }
+    }
+
+    /** Paid, or nothing to pay because a promotion code covered the whole price. */
+    static boolean isSettled(Session session) {
+        return "paid".equalsIgnoreCase(session.getPaymentStatus())
+            || "no_payment_required".equalsIgnoreCase(session.getPaymentStatus());
     }
 
     private void updateOrderFromCheckoutSession(Session session, String status) {
@@ -871,77 +773,6 @@ public class StripeShopService {
             scopedProducts.add(product);
         }
         return scopedProducts;
-    }
-
-    private List<ShopProductResponse> resolveScopedProductsFromCode(ShopAccessCode accessCode) {
-        if (accessCode.isFullAccess()) {
-            return getProducts();
-        }
-        if (!StringUtils.hasText(accessCode.getProductIdsCsv())) {
-            return List.of();
-        }
-
-        String[] productIds = accessCode.getProductIdsCsv().split(",");
-        List<ShopProductResponse> scopedProducts = new ArrayList<>();
-        for (String rawId : productIds) {
-            if (!StringUtils.hasText(rawId)) {
-                continue;
-            }
-            String productId = rawId.trim();
-            ShopProductResponse product = catalog().get(productId);
-            if (product != null) {
-                scopedProducts.add(product);
-            }
-        }
-        return scopedProducts;
-    }
-
-    private void requireAdminToken(String adminToken) {
-        if (!StringUtils.hasText(shopAdminToken)) {
-            throw new IllegalStateException("admin_token_not_configured");
-        }
-        if (!StringUtils.hasText(adminToken) || !shopAdminToken.equals(adminToken.trim())) {
-            throw new IllegalArgumentException("invalid_admin_token");
-        }
-    }
-
-    private String normalizeAccessCode(String rawCode, boolean allowBlank) {
-        if (!StringUtils.hasText(rawCode)) {
-            if (allowBlank) {
-                return null;
-            }
-            throw new IllegalArgumentException("access_code_required");
-        }
-
-        String normalized = rawCode.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9-]{6,64}")) {
-            throw new IllegalArgumentException("invalid_access_code_format");
-        }
-        return normalized;
-    }
-
-    private String generateUniqueAccessCode() {
-        for (int attempt = 0; attempt < 10; attempt++) {
-            String code = "OKD-" + randomAccessCodeBlock(4) + "-" + randomAccessCodeBlock(4) + "-" + randomAccessCodeBlock(4);
-            if (!shopAccessCodeRepository.existsByCode(code)) {
-                return code;
-            }
-        }
-
-        String fallback = "OKD-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase(Locale.ROOT);
-        if (shopAccessCodeRepository.existsByCode(fallback)) {
-            throw new IllegalStateException("access_code_generation_failed");
-        }
-        return fallback;
-    }
-
-    private String randomAccessCodeBlock(int length) {
-        StringBuilder builder = new StringBuilder(length);
-        for (int index = 0; index < length; index++) {
-            int next = ACCESS_CODE_RANDOM.nextInt(ACCESS_CODE_ALPHABET.length());
-            builder.append(ACCESS_CODE_ALPHABET.charAt(next));
-        }
-        return builder.toString();
     }
 
     @Transactional

@@ -1,36 +1,15 @@
-import { useState } from 'react';
-
 export default function CartView({
   cart,
   products,
   onRemoveFromCart,
   onCheckoutCart,
-  onRedeemFullAccessCode,
   onBack,
   shopLoading,
   accountSetupComplete,
 }) {
-  const [accessCode, setAccessCode] = useState('');
-  const [redeemMessage, setRedeemMessage] = useState(null);
-  const [redeemSuccess, setRedeemSuccess] = useState(false);
   const cartProducts = products.filter((p) => cart.includes(p.id));
   const totalCents = cartProducts.reduce((sum, p) => sum + p.amountCents, 0);
   const currency = cartProducts[0]?.currency ?? 'usd';
-
-  async function handleRedeemSubmit(event) {
-    event.preventDefault();
-    if (!accessCode.trim()) {
-      return;
-    }
-
-    setRedeemMessage(null);
-    const result = await onRedeemFullAccessCode(accessCode);
-    setRedeemMessage(result.message);
-    setRedeemSuccess(result.success);
-    if (result.success) {
-      setAccessCode('');
-    }
-  }
 
   return (
     <section>
@@ -100,35 +79,10 @@ export default function CartView({
         </div>
 
         <aside className="panel">
-          <h3>Have a one-time access code?</h3>
+          <h3>Have a promo code?</h3>
           <p className="muted">
-            Redeem it once to unlock your code-assigned products without going through Stripe.
+            Enter it on the Stripe checkout page, under &ldquo;Add promotion code&rdquo;. The discount shows before you pay.
           </p>
-
-          <form onSubmit={handleRedeemSubmit} className="inline-form">
-            <input
-              type="text"
-              value={accessCode}
-              onChange={(event) => setAccessCode(event.target.value.toUpperCase())}
-              placeholder="OKD-ABCD-EFGH-IJKL"
-              disabled={shopLoading}
-              aria-label="Access code"
-            />
-            <button
-              type="submit"
-              className="btn"
-              disabled={shopLoading || !accountSetupComplete || !accessCode.trim()}
-            >
-              Redeem Code
-            </button>
-          </form>
-
-          {!accountSetupComplete && (
-            <p className="notice warn mt-4">Link your Steam account before redeeming a code.</p>
-          )}
-          {redeemMessage && (
-            <p className={`notice mt-4 ${redeemSuccess ? 'ok' : 'warn'}`}>{redeemMessage}</p>
-          )}
         </aside>
       </div>
     </section>

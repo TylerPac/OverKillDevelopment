@@ -8,7 +8,6 @@ import {
   createSubscriptionCheckoutSession,
   getOrders,
   getProducts,
-  redeemFullAccessCode,
   syncCheckoutFromSession,
 } from './services/shopService';
 import AdminView from './views/AdminView';
@@ -350,62 +349,6 @@ export default function App() {
     }
   }
 
-  async function handleRedeemFullAccessCode(code) {
-    if (!session.authenticated) {
-      setStatus('Please log in before redeeming a code.');
-      setView('auth');
-      return { success: false, message: 'Please log in before redeeming a code.' };
-    }
-
-    if (!session.accountSetupComplete) {
-      return { success: false, message: 'Link your Steam account before redeeming a code.' };
-    }
-
-    setShopLoading(true);
-
-    try {
-      const response = await redeemFullAccessCode(code);
-      const nextOrders = await getOrders();
-      setOrders(Array.isArray(nextOrders) ? nextOrders : []);
-      await session.loadAuthProfile();
-      setCart([]);
-
-      const grantedCount = Number(response?.grantedCount || 0);
-      const msg =
-        grantedCount > 0
-          ? `Code redeemed. ${grantedCount} product${grantedCount === 1 ? '' : 's'} unlocked.`
-          : 'Code redeemed.';
-      setStatus(msg);
-      return { success: true, message: msg };
-    } catch (error) {
-      let msg;
-      switch (error.message) {
-        case 'access_code_required':
-          msg = 'Enter a code before redeeming.';
-          break;
-        case 'invalid_access_code':
-          msg = 'That code was not recognized.';
-          break;
-        case 'access_code_already_redeemed':
-          msg = 'That code has already been used.';
-          break;
-        case 'nothing_to_redeem':
-          msg = 'Your account already owns every product — nothing left to unlock.';
-          break;
-        case 'account_not_setup':
-          msg = 'Link your Steam account before redeeming a code.';
-          break;
-        default:
-          msg = `Code redeem failed: ${error.message}`;
-          break;
-      }
-      setStatus(msg);
-      return { success: false, message: msg };
-    } finally {
-      setShopLoading(false);
-    }
-  }
-
   async function handleBuy(productId) {
     if (!session.authenticated) {
       setStatus('Please log in before purchasing.');
@@ -719,7 +662,6 @@ export default function App() {
           onRemoveFromCart={removeFromCart}
           onBuy={handleBuy}
           onCheckoutCart={handleCartCheckout}
-          onRedeemFullAccessCode={handleRedeemFullAccessCode}
           onBack={openShop}
           shopLoading={shopLoading}
           accountSetupComplete={session.accountSetupComplete}

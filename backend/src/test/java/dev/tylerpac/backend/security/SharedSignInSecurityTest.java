@@ -116,7 +116,7 @@ class SharedSignInSecurityTest {
 
     @Test
     void sessionRequestsWithoutACsrfTokenAreRefused() throws Exception {
-        mvc.perform(post("/shop/access-codes/redeem").with(user(STEAM_ID))).andExpect(status().isForbidden());
+        mvc.perform(post("/shop/admin/grants").with(user(STEAM_ID))).andExpect(status().isForbidden());
         mvc.perform(post("/auth/logout").with(user(STEAM_ID))).andExpect(status().isForbidden());
     }
 
@@ -136,7 +136,12 @@ class SharedSignInSecurityTest {
     void serverToServerPostsAreNotBlockedByCsrf() throws Exception {
         mvc.perform(post("/shop/webhook")).andExpect(status().isNotFound());
         mvc.perform(post("/api/dayz/players")).andExpect(status().isNotFound());
-        mvc.perform(post("/shop/access-codes/create")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void theOldAdminTokenEndpointsAreNoLongerOpen() throws Exception {
+        mvc.perform(post("/shop/access-codes/create").header("X-Shop-Admin-Token", "anything")).andExpect(status().isForbidden());
+        mvc.perform(post("/shop/access-codes/full-unlock").header("X-Shop-Admin-Token", "anything")).andExpect(status().isForbidden());
     }
 
     @Test

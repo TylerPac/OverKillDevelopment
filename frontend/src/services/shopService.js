@@ -34,16 +34,6 @@ export function createCartCheckoutSession(productIds, idempotencyKey) {
   });
 }
 
-export function redeemFullAccessCode(code) {
-  return callJson('/shop/access-codes/redeem', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code }),
-  });
-}
-
 export function syncCheckoutFromSession(sessionId) {
   return callJson('/shop/checkout/sync', {
     method: 'POST',

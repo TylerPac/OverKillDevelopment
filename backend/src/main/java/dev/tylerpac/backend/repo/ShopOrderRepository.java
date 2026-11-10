@@ -16,4 +16,5 @@ public interface ShopOrderRepository extends JpaRepository<ShopOrder, Long> {
     Optional<ShopOrder> findByStripePaymentIntentId(String stripePaymentIntentId);
     List<ShopOrder> findTop100ByStatusOrderByUpdatedAtAsc(String status);
     boolean existsByUserAndProductIdAndStatusIgnoreCase(User user, String productId, String status);
+    List<ShopOrder> findByStripeCheckoutSessionIdStartingWith(String prefix);
 }

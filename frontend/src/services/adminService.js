@@ -1,33 +1,19 @@
 import { callJson } from './apiClient';
 
-export function listAccessCodes() {
-  return callJson('/shop/admin/codes');
+export function listGrants() {
+  return callJson('/shop/admin/grants');
 }
 
-export function createFullUnlockCode(code) {
-  return callJson('/shop/admin/codes/full-unlock', {
+export function grantProducts(steamId, productIds) {
+  return callJson('/shop/admin/grants', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(code ? { code } : {}),
+    body: JSON.stringify({ steamId, productIds }),
   });
 }
 
-export function createSpecificCode(code, productIds) {
-  return callJson('/shop/admin/codes/create', {
+export function revokeGrant(id) {
+  return callJson(`/shop/admin/grants/${id}/revoke`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...(code ? { code } : {}), productIds }),
-  });
-}
-
-export function revokeCode(id) {
-  return callJson(`/shop/admin/codes/${id}/revoke`, {
-    method: 'POST',
-  });
-}
-
-export function deleteCode(id) {
-  return callJson(`/shop/admin/codes/${id}`, {
-    method: 'DELETE',
   });
 }
