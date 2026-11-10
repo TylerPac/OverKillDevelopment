@@ -4,44 +4,14 @@ import { markProductRelease } from '../services/apiClient';
 
 const AVAILABLE_PRODUCTS = ['keycard-crates', 'weapon-system', 'battle-pass'];
 
-const cardStyle = {
-  background: '#1a1d2e',
-  border: '1px solid #2a2d3e',
-  borderRadius: 8,
-  padding: '1.25rem 1.5rem',
-  marginBottom: '1.5rem',
-};
-
-const inputStyle = {
-  background: '#12141f',
-  border: '1px solid #2a2d3e',
-  borderRadius: 4,
-  color: '#e0e8ff',
-  fontSize: '0.9rem',
-  padding: '0.45rem 0.75rem',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnStyle = (variant = 'primary') => ({
-  background: variant === 'primary' ? '#3a5cd8' : variant === 'danger' ? '#8b1a1a' : '#2a2d3e',
-  border: 'none',
-  borderRadius: 4,
-  color: variant === 'muted' ? '#aab' : '#e0e8ff',
-  cursor: 'pointer',
-  fontSize: '0.85rem',
-  padding: '0.4rem 1rem',
-  whiteSpace: 'nowrap',
-});
-
 function StatusBadge({ code }) {
   if (code.revoked) {
-    return <span style={{ color: '#e05', fontSize: '0.78rem', fontWeight: 600 }}>Revoked</span>;
+    return <span className="status off">Revoked</span>;
   }
   if (code.redeemed) {
-    return <span style={{ color: '#7e7', fontSize: '0.78rem', fontWeight: 600 }}>Redeemed</span>;
+    return <span className="status ok">Redeemed</span>;
   }
-  return <span style={{ color: '#5bf', fontSize: '0.78rem', fontWeight: 600 }}>Available</span>;
+  return <span className="status live">Available</span>;
 }
 
 function CreateCodeForm({ onCreated }) {
@@ -83,51 +53,36 @@ function CreateCodeForm({ onCreated }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} style={cardStyle}>
-      <h3 style={{ margin: '0 0 1rem', color: '#c0cfff', fontSize: '1rem' }}>Create Access Code</h3>
+    <form onSubmit={handleSubmit} className="panel panel-accent">
+      <h3>Create Access Code</h3>
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+      <div className="chips field">
         <button
           type="button"
           onClick={() => setMode('full')}
-          style={{ ...btnStyle(mode === 'full' ? 'primary' : 'muted'), borderRadius: 4 }}
+          className={mode === 'full' ? 'chip active' : 'chip'}
         >
           Full Unlock
         </button>
         <button
           type="button"
           onClick={() => setMode('specific')}
-          style={{ ...btnStyle(mode === 'specific' ? 'primary' : 'muted'), borderRadius: 4 }}
+          className={mode === 'specific' ? 'chip active' : 'chip'}
         >
           Specific Products
         </button>
       </div>
 
       {mode === 'specific' && (
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{ fontSize: '0.82rem', color: '#778', marginBottom: '0.4rem' }}>Products</div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div className="field">
+          <span className="label">Products</span>
+          <div className="chips">
             {AVAILABLE_PRODUCTS.map((p) => (
-              <label
-                key={p}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                  color: selectedProducts.includes(p) ? '#8cf' : '#889',
-                  background: selectedProducts.includes(p) ? '#1c2a4a' : '#181a27',
-                  border: `1px solid ${selectedProducts.includes(p) ? '#3a5cd8' : '#2a2d3e'}`,
-                  borderRadius: 4,
-                  padding: '0.3rem 0.7rem',
-                }}
-              >
+              <label key={p} className={selectedProducts.includes(p) ? 'chip active' : 'chip'}>
                 <input
                   type="checkbox"
                   checked={selectedProducts.includes(p)}
                   onChange={() => toggleProduct(p)}
-                  style={{ display: 'none' }}
                 />
                 {p}
               </label>
@@ -136,12 +91,13 @@ function CreateCodeForm({ onCreated }) {
         </div>
       )}
 
-      <div style={{ marginBottom: '1rem' }}>
-        <div style={{ fontSize: '0.82rem', color: '#778', marginBottom: '0.4rem' }}>
-          Custom code <span style={{ color: '#556' }}>(optional — leave blank to auto-generate)</span>
-        </div>
+      <div className="field">
+        <label className="label" htmlFor="admin-custom-code">
+          Custom code <span className="dim">(optional — leave blank to auto-generate)</span>
+        </label>
         <input
-          style={inputStyle}
+          id="admin-custom-code"
+          className="input-block"
           type="text"
           placeholder="e.g. LAUNCH2024"
           value={customCode}
@@ -150,9 +106,9 @@ function CreateCodeForm({ onCreated }) {
         />
       </div>
 
-      {error && <div style={{ color: '#f66', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{error}</div>}
+      {error && <p className="notice error">{error}</p>}
 
-      <button type="submit" style={btnStyle('primary')} disabled={loading}>
+      <button type="submit" className="btn btn-primary" disabled={loading}>
         {loading ? 'Creating…' : 'Create Code'}
       </button>
     </form>
@@ -182,65 +138,51 @@ function CodeRow({ code, onRevoke, onDelete }) {
 
   return (
     <tr>
-      <td style={{ padding: '0.55rem 0.75rem', fontFamily: 'monospace', fontSize: '0.9rem', color: '#c8d8ff' }}>
-        {code.code}
-      </td>
-      <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: '#889' }}>
+      <td className="code">{code.code}</td>
+      <td>
         {code.fullAccess
-          ? <span style={{ color: '#ad8' }}>Full Unlock</span>
-          : (code.productIds?.join(', ') || '—')}
+          ? <span className="status ok">Full Unlock</span>
+          : <span className="muted">{code.productIds?.join(', ') || '—'}</span>}
       </td>
-      <td style={{ padding: '0.55rem 0.75rem' }}>
+      <td>
         <StatusBadge code={code} />
       </td>
-      <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.78rem', color: '#667' }}>
-        {code.redeemedByUsername || '—'}
-      </td>
-      <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.78rem', color: '#556' }}>
-        {code.createdAt ? new Date(code.createdAt).toLocaleDateString() : '—'}
-      </td>
-      <td style={{ padding: '0.55rem 0.75rem', textAlign: 'right' }}>
+      <td className="muted">{code.redeemedByUsername || '—'}</td>
+      <td className="dim">{code.createdAt ? new Date(code.createdAt).toLocaleDateString() : '—'}</td>
+      <td className="actions">
         {!code.revoked && (
-          <>
+          <div className="button-row end">
             <button
               type="button"
               onClick={handleRevoke}
-              style={btnStyle(confirming ? 'danger' : 'muted')}
+              className={confirming ? 'btn btn-sm btn-danger' : 'btn btn-sm'}
               disabled={loading}
             >
               {loading && confirming ? '…' : confirming ? 'Confirm Revoke' : 'Revoke'}
             </button>
             {confirming && !loading && (
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                style={{ ...btnStyle('muted'), marginLeft: '0.4rem' }}
-              >
+              <button type="button" onClick={() => setConfirming(false)} className="btn btn-sm">
                 Cancel
               </button>
             )}
-          </>
+          </div>
         )}
         {code.revoked && (
-          <>
+          <div className="button-row end">
             <button
               type="button"
               onClick={handleDelete}
-              style={btnStyle(confirmingDelete ? 'danger' : 'muted')}
+              className={confirmingDelete ? 'btn btn-sm btn-danger' : 'btn btn-sm'}
               disabled={loading}
             >
               {loading && confirmingDelete ? '…' : confirmingDelete ? 'Confirm Delete' : 'Delete'}
             </button>
             {confirmingDelete && !loading && (
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-                style={{ ...btnStyle('muted'), marginLeft: '0.4rem' }}
-              >
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="btn btn-sm">
                 Cancel
               </button>
             )}
-          </>
+          </div>
         )}
       </td>
     </tr>
@@ -269,44 +211,29 @@ function MarkProductReleaseForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} style={cardStyle}>
-      <h3 style={{ margin: '0 0 1rem', color: '#c0cfff', fontSize: '1rem' }}>Mark New File Release</h3>
-      <p style={{ color: '#778', fontSize: '0.82rem', marginBottom: '1rem', marginTop: 0 }}>
+    <form onSubmit={handleSubmit} className="panel">
+      <h3>Mark New File Release</h3>
+      <p className="muted">
         When you upload a new version of a mod file, mark it here. Customers who
         haven&apos;t downloaded since this point will see a &ldquo;New Update&rdquo; badge.
       </p>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+      <div className="chips field">
         {AVAILABLE_PRODUCTS.map((p) => (
-          <label
-            key={p}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.3rem',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              color: selectedProduct === p ? '#8cf' : '#889',
-              background: selectedProduct === p ? '#1c2a4a' : '#181a27',
-              border: `1px solid ${selectedProduct === p ? '#3a5cd8' : '#2a2d3e'}`,
-              borderRadius: 4,
-              padding: '0.3rem 0.7rem',
-            }}
-          >
+          <label key={p} className={selectedProduct === p ? 'chip active' : 'chip'}>
             <input
               type="radio"
               name="releaseProduct"
               value={p}
               checked={selectedProduct === p}
               onChange={() => setSelectedProduct(p)}
-              style={{ display: 'none' }}
             />
             {p}
           </label>
         ))}
       </div>
-      {error && <div style={{ color: '#f66', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{error}</div>}
-      {result && <div style={{ color: '#4dde8a', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{result}</div>}
-      <button type="submit" style={btnStyle('primary')} disabled={loading}>
+      {error && <p className="notice error">{error}</p>}
+      {result && <p className="notice ok">{result}</p>}
+      <button type="submit" className="btn btn-primary" disabled={loading}>
         {loading ? 'Saving…' : 'Mark as New Release'}
       </button>
     </form>
@@ -360,50 +287,50 @@ export default function AdminView() {
   });
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '2rem 1rem' }}>
-      <h2 style={{ margin: '0 0 1.5rem', color: '#c0cfff', fontSize: '1.3rem', fontWeight: 700 }}>
-        Admin — Access Codes
-      </h2>
+    <section>
+      <header className="page-head">
+        <p className="kicker"><span className="tag">Command</span> Admin</p>
+        <h1>Admin — Access Codes</h1>
+      </header>
 
-      <CreateCodeForm onCreated={fetchCodes} />
+      <div className="split">
+        <CreateCodeForm onCreated={fetchCodes} />
+        <MarkProductReleaseForm />
+      </div>
 
-      <MarkProductReleaseForm />
-
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h3 style={{ margin: 0, color: '#c0cfff', fontSize: '1rem' }}>
-            All Codes{!loading && ` (${codes.length})`}
-          </h3>
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
+      <section className="section">
+        <div className="section-head">
+          <h2>All Codes{!loading && ` (${codes.length})`}</h2>
+          <div className="chips">
             {['all', 'available', 'redeemed', 'revoked'].map((f) => (
               <button
                 key={f}
                 type="button"
                 onClick={() => setFilter(f)}
-                style={{ ...btnStyle(filter === f ? 'primary' : 'muted'), textTransform: 'capitalize', fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}
+                className={filter === f ? 'chip active' : 'chip'}
               >
                 {f}
               </button>
             ))}
-            <button type="button" onClick={fetchCodes} style={{ ...btnStyle('muted'), fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}>
+            <button type="button" onClick={fetchCodes} className="chip">
               Refresh
             </button>
           </div>
         </div>
 
-        {error && <div style={{ color: '#f66', fontSize: '0.82rem', marginBottom: '0.75rem' }}>{error}</div>}
+        {error && <p className="notice error">{error}</p>}
 
         {loading ? (
-          <div style={{ color: '#556', fontSize: '0.9rem' }}>Loading…</div>
+          <p className="notice">Loading…</p>
         ) : filtered.length === 0 ? (
-          <div style={{ color: '#445', fontSize: '0.9rem' }}>No codes found.</div>
+          <p className="empty">No codes found.</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+          <div className="table-wrap">
+            <table className="data-table">
               <thead>
-                <tr style={{ borderBottom: '1px solid #2a2d3e' }}>
+                <tr>
                   {['Code', 'Scope', 'Status', 'Redeemed By', 'Created', ''].map((h) => (
-                    <th key={h} style={{ padding: '0.4rem 0.75rem', textAlign: h === '' ? 'right' : 'left', color: '#556', fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
+                    <th key={h} className={h === '' ? 'actions' : undefined}>
                       {h}
                     </th>
                   ))}
@@ -417,7 +344,7 @@ export default function AdminView() {
             </table>
           </div>
         )}
-      </div>
-    </div>
+      </section>
+    </section>
   );
 }

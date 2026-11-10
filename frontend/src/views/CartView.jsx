@@ -33,150 +33,104 @@ export default function CartView({
   }
 
   return (
-    <section style={{ marginTop: '1rem' }}>
-      <h2>Cart</h2>
+    <section>
+      <header className="page-head">
+        <p className="kicker"><span className="tag">Loadout</span> {cartProducts.length} item{cartProducts.length === 1 ? '' : 's'}</p>
+        <h1>Cart</h1>
+      </header>
 
-      <div
-        style={{
-          marginTop: '1rem',
-          marginBottom: '1rem',
-          maxWidth: 620,
-          padding: '0.85rem 1rem',
-          background: '#171725',
-          border: '1px solid #2f3550',
-          borderRadius: 8,
-        }}
-      >
-        <p style={{ margin: 0, color: '#eee', fontWeight: 600 }}>
-          Have a one-time access code?
-        </p>
-        <p style={{ margin: '0.35rem 0 0', color: '#9fb1d1', fontSize: '0.85rem' }}>
-          Redeem it once to unlock your code-assigned products without going through Stripe.
-        </p>
+      <div className="split">
+        <div>
+          {cartProducts.length === 0 ? (
+            <div className="empty">
+              <p>Your cart is empty.</p>
+              <button type="button" className="btn btn-primary" onClick={onBack}>Browse Shop</button>
+            </div>
+          ) : (
+            <>
+              <div className="rows">
+                {cartProducts.map((product) => {
+                  const price = `${(product.amountCents / 100).toFixed(2)} ${String(product.currency || '').toUpperCase()}`;
+                  return (
+                    <article key={product.id} className="row">
+                      <div className="row-main">
+                        <strong>{product.name}</strong>
+                        <span className="row-meta">{price}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={() => onRemoveFromCart(product.id)}
+                      >
+                        Remove
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
 
-        <form
-          onSubmit={handleRedeemSubmit}
-          style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginTop: '0.9rem' }}
-        >
-          <input
-            type="text"
-            value={accessCode}
-            onChange={(event) => setAccessCode(event.target.value.toUpperCase())}
-            placeholder="OKD-ABCD-EFGH-IJKL"
-            disabled={shopLoading}
-            style={{
-              flex: '1 1 280px',
-              minWidth: 220,
-              padding: '0.6rem 0.75rem',
-              borderRadius: 6,
-              border: '1px solid #44516d',
-              background: '#0f1320',
-              color: '#eee',
-              fontFamily: 'inherit',
-            }}
-          />
-          <button
-            type="submit"
-            disabled={shopLoading || !accountSetupComplete || !accessCode.trim()}
-            style={{ padding: '0.6rem 1rem', fontSize: '0.9rem' }}
-          >
-            Redeem Code
-          </button>
-        </form>
+              {!accountSetupComplete && (
+                <p className="notice warn mt-4">Link your Steam account before purchasing.</p>
+              )}
 
-        {!accountSetupComplete && (
-          <p style={{ color: '#f4a261', fontSize: '0.8rem', margin: '0.65rem 0 0' }}>
-            Link your Steam account before redeeming a code.
-          </p>
-        )}
-        {redeemMessage && (
-          <p style={{ color: redeemSuccess ? '#4dde8a' : '#f4a261', fontSize: '0.85rem', margin: '0.65rem 0 0' }}>
-            {redeemMessage}
-          </p>
-        )}
-      </div>
-
-      {cartProducts.length === 0 ? (
-        <div style={{ marginTop: '1rem' }}>
-          <p style={{ color: '#888' }}>Your cart is empty.</p>
-          <button type="button" onClick={onBack}>Browse Shop</button>
-        </div>
-      ) : (
-        <>
-          <div style={{ display: 'grid', gap: '0.75rem', maxWidth: 620 }}>
-            {cartProducts.map((product) => {
-              const price = `${(product.amountCents / 100).toFixed(2)} ${String(product.currency || '').toUpperCase()}`;
-              return (
-                <article
-                  key={product.id}
-                  style={{
-                    background: '#1e1e2e', border: '1px solid #333',
-                    borderRadius: 8, padding: '0.85rem 1rem',
-                  }}
+              {/* Cart total + single checkout */}
+              <div className="total-bar">
+                <div>
+                  <span className="label">Total</span>
+                  <span className="price">
+                    {(totalCents / 100).toFixed(2)}
+                    <small>{String(currency).toUpperCase()}</small>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg"
+                  disabled={shopLoading || !accountSetupComplete}
+                  onClick={onCheckoutCart}
                 >
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem',
-                  }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, color: '#eee', fontSize: '0.95rem' }}>
-                        {product.name}
-                      </p>
-                      <p style={{ margin: '0.2rem 0 0', color: '#cdf', fontSize: '0.9rem' }}>
-                        {price}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveFromCart(product.id)}
-                      style={{
-                        background: 'transparent', border: '1px solid #633',
-                        color: '#f88', borderRadius: 4, padding: '4px 10px',
-                        fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit',
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                  Checkout All with Stripe
+                </button>
+              </div>
+
+              <p className="fine mt-4">
+                All items are processed in a single Stripe Checkout session.
+              </p>
+            </>
+          )}
+        </div>
+
+        <aside className="panel">
+          <h3>Have a one-time access code?</h3>
+          <p className="muted">
+            Redeem it once to unlock your code-assigned products without going through Stripe.
+          </p>
+
+          <form onSubmit={handleRedeemSubmit} className="inline-form">
+            <input
+              type="text"
+              value={accessCode}
+              onChange={(event) => setAccessCode(event.target.value.toUpperCase())}
+              placeholder="OKD-ABCD-EFGH-IJKL"
+              disabled={shopLoading}
+              aria-label="Access code"
+            />
+            <button
+              type="submit"
+              className="btn"
+              disabled={shopLoading || !accountSetupComplete || !accessCode.trim()}
+            >
+              Redeem Code
+            </button>
+          </form>
 
           {!accountSetupComplete && (
-            <p style={{ color: '#f4a261', fontSize: '0.85rem', marginTop: '0.75rem' }}>
-              Link your Steam account before purchasing.
-            </p>
+            <p className="notice warn mt-4">Link your Steam account before redeeming a code.</p>
           )}
-
-          {/* Cart total + single checkout */}
-          <div style={{
-            marginTop: '1.25rem', padding: '0.85rem 1rem',
-            background: '#1e1e2e', border: '1px solid #333', borderRadius: 8,
-            maxWidth: 620, display: 'flex', justifyContent: 'space-between',
-            alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem',
-          }}>
-            <div>
-              <p style={{ margin: 0, color: '#aaa', fontSize: '0.82rem' }}>Total</p>
-              <p style={{ margin: '0.15rem 0 0', color: '#cdf', fontWeight: 700, fontSize: '1.1rem' }}>
-                {(totalCents / 100).toFixed(2)} {String(currency).toUpperCase()}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={shopLoading || !accountSetupComplete}
-              onClick={onCheckoutCart}
-              style={{ padding: '6px 20px', fontSize: '0.9rem' }}
-            >
-              Checkout All with Stripe
-            </button>
-          </div>
-
-          <p style={{ color: '#555', fontSize: '0.78rem', marginTop: '0.5rem' }}>
-            All items are processed in a single Stripe Checkout session.
-          </p>
-        </>
-      )}
+          {redeemMessage && (
+            <p className={`notice mt-4 ${redeemSuccess ? 'ok' : 'warn'}`}>{redeemMessage}</p>
+          )}
+        </aside>
+      </div>
     </section>
   );
 }

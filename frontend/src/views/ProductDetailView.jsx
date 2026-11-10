@@ -325,32 +325,52 @@ export default function ProductDetailView({
     goTo(idx);
   };
 
+  const clickable = slides.length > 1 && !isVideoSlide(currentSlide);
+
   return (
-    <section style={{ marginTop: '0.5rem' }}>
+    <section>
       {/* Back */}
-      <button
-        type="button"
-        onClick={onBack}
-        style={{
-          background: 'transparent', border: 'none', color: '#8ab4f8',
-          cursor: 'pointer', padding: '0 0 1rem 0', fontSize: '0.9rem', fontFamily: 'inherit',
-        }}
-      >
+      <button type="button" onClick={onBack} className="btn-text">
         ← Back to Shop
       </button>
+
+      {/* Title + actions */}
+      <div className="detail-head">
+        <div>
+          <p className="kicker"><span className="tag">Mod</span> {product.id}</p>
+          <h1>{product.name}</h1>
+          {meta.tagline && <p className="tagline">{meta.tagline}</p>}
+        </div>
+        <div className="buy-box">
+          <span className="label">Price</span>
+          <span className="price">{price}</span>
+          <button
+            type="button"
+            disabled={inCart}
+            onClick={() => onAddToCart(product.id)}
+            className={inCart ? 'btn btn-done' : 'btn'}
+          >
+            {inCart ? '✓ In Cart' : '+ Add to Cart'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            disabled={shopLoading || !accountSetupComplete}
+            onClick={() => onBuy(product.id)}
+          >
+            Buy Now
+          </button>
+          {!accountSetupComplete && (
+            <p className="notice warn">Link your Steam account before buying.</p>
+          )}
+        </div>
+      </div>
 
       {/* Carousel */}
       <div
         aria-label={`${product.name} screenshots`}
-        onClick={slides.length > 1 && !isVideoSlide(currentSlide) ? handleImageClick : undefined}
-        style={{
-          width: '100%', maxWidth: 760, marginBottom: '1.5rem',
-          borderRadius: 8, overflow: 'hidden',
-          background: '#1e1e2e', border: '1px solid #333',
-          aspectRatio: '16/9', position: 'relative',
-          cursor: slides.length > 1 && !isVideoSlide(currentSlide) ? 'pointer' : 'default',
-          userSelect: 'none',
-        }}
+        onClick={clickable ? handleImageClick : undefined}
+        className={clickable ? 'carousel clickable' : 'carousel'}
       >
         {/* Current slide */}
         {isVideoSlide(currentSlide) ? (
@@ -360,15 +380,11 @@ export default function ProductDetailView({
             title={`${product.name} video ${slideIndex + 1}`}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
-            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
           />
         ) : imgErrors.has(slideIndex) ? (
-          <div style={{
-            width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: '#444',
-          }}>
-            <span style={{ fontSize: '2.5rem' }}>🖼</span>
-            <span style={{ fontSize: '0.85rem' }}>Place image at /public{currentSlide}</span>
+          <div className="carousel-missing">
+            <span>🖼</span>
+            <span>Place image at /public{currentSlide}</span>
           </div>
         ) : (
           <img
@@ -376,234 +392,125 @@ export default function ProductDetailView({
             src={currentSlide}
             alt={`${product.name} ${slideIndex + 1}`}
             onError={() => setImgErrors((prev) => new Set(prev).add(slideIndex))}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         )}
 
         {slides.length > 1 && (
           <>
-            {/* Left arrow */}
-            <button
-              type="button"
-              aria-label="Previous image"
-              onClick={(e) => handleArrow(e, -1)}
-              style={carouselArrowStyle('left')}
-            >
+            <button type="button" aria-label="Previous image" onClick={(e) => handleArrow(e, -1)} className="carousel-arrow left">
               ‹
             </button>
-
-            {/* Right arrow */}
-            <button
-              type="button"
-              aria-label="Next image"
-              onClick={(e) => handleArrow(e, 1)}
-              style={carouselArrowStyle('right')}
-            >
+            <button type="button" aria-label="Next image" onClick={(e) => handleArrow(e, 1)} className="carousel-arrow right">
               ›
             </button>
 
             {/* Mode badge — hide when on a video slide */}
             {!isVideoSlide(currentSlide) && (
-              <div style={{
-                position: 'absolute', top: 8, right: 8, pointerEvents: 'none',
-                background: isAuto ? 'rgba(30,80,180,0.75)' : 'rgba(50,50,60,0.8)',
-                color: '#ddd', fontSize: '0.65rem', letterSpacing: '0.05em',
-                padding: '2px 8px', borderRadius: 10,
-              }}>
+              <div className={isAuto ? 'carousel-mode auto' : 'carousel-mode'}>
                 {isAuto ? 'AUTO' : 'MANUAL'}
               </div>
             )}
 
             {/* Dot indicators */}
-            <div style={{
-              position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
-              display: 'flex', gap: 6, alignItems: 'center',
-            }}>
+            <div className="carousel-dots">
               {slides.map((slide, i) => (
-                isVideoSlide(slide) ? (
-                  <div
-                    key={i}
-                    role="button"
-                    aria-label={`Go to video ${i + 1}`}
-                    tabIndex={0}
-                    onClick={(e) => handleDot(e, i)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleDot(e, i)}
-                    style={{
-                      width: 16, height: 16, borderRadius: '50%', cursor: 'pointer',
-                      background: i === slideIndex ? 'rgba(255,80,80,0.9)' : 'rgba(255,255,255,0.28)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '0.5rem', color: '#fff', transition: 'background 0.2s',
-                    }}
-                  >
-                    ▶
-                  </div>
-                ) : (
-                  <div
-                    key={i}
-                    role="button"
-                    aria-label={`Go to image ${i + 1}`}
-                    tabIndex={0}
-                    onClick={(e) => handleDot(e, i)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleDot(e, i)}
-                    style={{
-                      width: 8, height: 8, borderRadius: '50%', cursor: 'pointer',
-                      background: i === slideIndex ? '#cdf' : 'rgba(255,255,255,0.28)',
-                      transition: 'background 0.2s',
-                    }}
-                  />
-                )
+                <div
+                  key={i}
+                  role="button"
+                  aria-label={isVideoSlide(slide) ? `Go to video ${i + 1}` : `Go to image ${i + 1}`}
+                  tabIndex={0}
+                  onClick={(e) => handleDot(e, i)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleDot(e, i)}
+                  className={`carousel-dot${isVideoSlide(slide) ? ' video' : ''}${i === slideIndex ? ' active' : ''}`}
+                >
+                  {isVideoSlide(slide) ? '▶' : null}
+                </div>
               ))}
             </div>
           </>
         )}
       </div>
 
-      {/* Title + actions */}
-      <div style={{ maxWidth: 760, marginBottom: '1.25rem' }}>
-        <h2 style={{ margin: '0 0 0.25rem 0' }}>{product.name}</h2>
-        {meta.tagline && (
-          <p style={{ margin: '0 0 0.75rem 0', color: '#aaa', fontSize: '0.95rem' }}>{meta.tagline}</p>
-        )}
-        <p style={{ margin: '0 0 0.5rem 0', color: '#cdf', fontSize: '1.2rem', fontWeight: 700 }}>{price}</p>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            disabled={inCart}
-            onClick={() => onAddToCart(product.id)}
-            style={{
-              background: inCart ? '#1e3a1e' : '#1e2a4a',
-              border: `1px solid ${inCart ? '#3a7a3a' : '#3a5a8e'}`,
-              color: inCart ? '#8f8' : '#adf',
-              borderRadius: 4, padding: '5px 14px',
-              cursor: inCart ? 'default' : 'pointer',
-              fontSize: '0.85rem', fontFamily: 'inherit',
-            }}
-          >
-            {inCart ? '✓ In Cart' : '+ Add to Cart'}
-          </button>
-          <button
-            type="button"
-            disabled={shopLoading || !accountSetupComplete}
-            onClick={() => onBuy(product.id)}
-          >
-            Buy Now
-          </button>
-          {!accountSetupComplete && (
-            <p style={{ margin: 0, color: '#f4a261', fontSize: '0.78rem' }}>
-              Link your Steam account before buying.
-            </p>
-          )}
-        </div>
-      </div>
-
       {/* About */}
-      <div style={cardStyle}>
-        <h3 style={cardHeadingStyle}>About</h3>
-        <p style={{ margin: 0, color: '#ccc', lineHeight: 1.7 }}>{meta.about || product.description}</p>
-      </div>
+      <section className="section">
+        <div className="section-head">
+          <h2><span className="index">01</span>About</h2>
+        </div>
+        <p className="prose lead-text">{meta.about || product.description}</p>
+      </section>
 
       {/* Features — grouped sections */}
       {meta.featureSections?.length > 0 && (
-        <div style={cardStyle}>
-          <h3 style={cardHeadingStyle}>⚙️ Core Features</h3>
-          {meta.featureSections.map((section) => (
-            <div key={section.title} style={{ marginBottom: '1rem' }}>
-              <p style={{ margin: '0 0 0.3rem 0', color: '#cdf', fontWeight: 600, fontSize: '0.95rem' }}>{section.title}</p>
-              <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#ccc', lineHeight: 1.8 }}>
-                {section.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+        <section className="section">
+          <div className="section-head">
+            <h2><span className="index">02</span>⚙️ Core Features</h2>
+            <p>{meta.featureSections.length} systems</p>
+          </div>
+          <div className="feature-grid">
+            {meta.featureSections.map((section) => (
+              <div key={section.title} className="feature">
+                <h4>{section.title}</h4>
+                <ul>
+                  {section.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Features — flat list (fallback) */}
       {!meta.featureSections && meta.features?.length > 0 && (
-        <div style={cardStyle}>
-          <h3 style={cardHeadingStyle}>Features</h3>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#ccc', lineHeight: 1.9 }}>
-            {meta.features.map((f) => (
-              <li key={f}>{f}</li>
-            ))}
-          </ul>
-        </div>
+        <section className="section">
+          <div className="section-head">
+            <h2><span className="index">02</span>Features</h2>
+          </div>
+          <div className="panel">
+            <ul>
+              {meta.features.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
       )}
 
       {/* Why This Is Different */}
       {meta.whyDifferent?.length > 0 && (
-        <div style={cardStyle}>
-          <h3 style={cardHeadingStyle}>🧩 Why This Is Different</h3>
-          <p style={{ margin: '0 0 0.5rem 0', color: '#aaa', fontSize: '0.9rem' }}>No other system combines:</p>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#ccc', lineHeight: 1.9 }}>
-            {meta.whyDifferent.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
+        <section className="section">
+          <div className="panel panel-accent">
+            <h3>🧩 Why This Is Different</h3>
+            <p className="muted">No other system combines:</p>
+            <ul>
+              {meta.whyDifferent.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
       )}
 
       {/* Changelog */}
       {meta.changelog?.length > 0 && (
-        <div style={cardStyle}>
-          <h3 style={cardHeadingStyle}>Changelog</h3>
-          {meta.changelog.map((entry, i) => (
-            <div
-              key={entry.version}
-              style={{
-                borderTop: i > 0 ? '1px solid #2a2a3e' : 'none',
-                paddingTop: i > 0 ? '0.65rem' : 0,
-                marginTop: i > 0 ? '0.65rem' : 0,
-              }}
-            >
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.2rem' }}>
-                <span style={{ color: '#cdf', fontWeight: 600, fontSize: '0.9rem' }}>v{entry.version}</span>
-                <span style={{ color: '#555', fontSize: '0.8rem' }}>{entry.date}</span>
+        <section className="section">
+          <div className="section-head">
+            <h2><span className="index">03</span>Changelog</h2>
+          </div>
+          <div className="panel">
+            {meta.changelog.map((entry) => (
+              <div key={entry.version} className="changelog-entry">
+                <div>
+                  <span className="ver">v{entry.version}</span>
+                  <span className="date">{entry.date}</span>
+                </div>
+                <p>{entry.notes}</p>
               </div>
-              <p style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>{entry.notes}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </section>
       )}
     </section>
   );
 }
-
-const cardStyle = {
-  background: '#1e1e2e',
-  border: '1px solid #333',
-  borderRadius: 8,
-  padding: '1rem',
-  marginBottom: '1rem',
-  maxWidth: 760,
-};
-
-const cardHeadingStyle = {
-  marginTop: 0,
-  marginBottom: '0.6rem',
-  fontSize: '1rem',
-  color: '#cdf',
-};
-
-const carouselArrowStyle = (side) => ({
-  position: 'absolute',
-  top: '50%',
-  transform: 'translateY(-50%)',
-  [side]: 8,
-  zIndex: 2,
-  background: 'rgba(0,0,0,0.55)',
-  border: 'none',
-  color: '#fff',
-  fontSize: '2rem',
-  width: 38,
-  height: 38,
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'pointer',
-  lineHeight: 1,
-  fontFamily: 'inherit',
-  padding: 0,
-});

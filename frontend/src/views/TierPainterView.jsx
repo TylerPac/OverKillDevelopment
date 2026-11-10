@@ -259,7 +259,7 @@ export default function TierPainterView({ onBack }) {
 
       // ── Background ───────────────────────────────────────────────────
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#1a1a2e';
+      ctx.fillStyle = '#121313';
       ctx.fillRect(offsetX, offsetY, worldW, worldH);
 
       // ── Map image — GPU-scaled blit, O(1) ───────────────────────────
@@ -663,11 +663,11 @@ export default function TierPainterView({ onBack }) {
   }
 
   return (
-    <div style={styles.root}>
+    <div className="tool-shell">
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <div style={styles.sidebar}>
-        <button onClick={onBack} style={styles.backBtn}>← Back</button>
-        <h2 style={styles.title}>DayZ Tools</h2>
+      <div className="tool-sidebar">
+        <button onClick={onBack} className="btn btn-sm tool-back">← Back</button>
+        <h2 className="tool-title">DayZ <em>Tools</em></h2>
 
         {/* Map preset */}
         <section style={styles.section}>
@@ -715,7 +715,7 @@ export default function TierPainterView({ onBack }) {
                 style={{
                   ...styles.tierBtn,
                   background: tierColor(i, i === tierIdx),
-                  outline: i === tierIdx ? '2px solid #fff' : 'none',
+                  outline: i === tierIdx ? '2px solid var(--white)' : 'none',
                 }}
               >
                 T{i + 1}
@@ -737,7 +737,7 @@ export default function TierPainterView({ onBack }) {
           />
           <button
             onClick={() => setEraseMode((v) => !v)}
-            style={{ ...styles.btn, background: eraseMode ? '#c0392b' : '#555' }}
+            style={{ ...styles.btn, ...(eraseMode ? styles.btnActive : {}) }}
           >
             {eraseMode ? 'Erasing (E)' : 'Painting (E)'}
           </button>
@@ -756,7 +756,7 @@ export default function TierPainterView({ onBack }) {
           {isUsingPreset && savedMaps.some((m) => !m.mapName.startsWith(selectedPreset + '::')) && (
             <button
               onClick={() => setSelectedPreset('')}
-              style={{ ...styles.microBtn, marginBottom: 4, color: '#aaa', fontSize: 11 }}
+              style={{ ...styles.microBtn, marginBottom: 4 }}
             >
               Show All Maps
             </button>
@@ -772,7 +772,7 @@ export default function TierPainterView({ onBack }) {
                     {displayMapName(m.mapName)}
                   </span>
                   <button onClick={() => handleLoad(m.mapName)}   style={styles.microBtn} disabled={mapLoading}>Load</button>
-                  <button onClick={() => handleDelete(m.mapName)} style={{ ...styles.microBtn, color: '#f88' }} disabled={mapLoading}>Del</button>
+                  <button onClick={() => handleDelete(m.mapName)} style={{ ...styles.microBtn, color: 'var(--red-hot)' }} disabled={mapLoading}>Del</button>
                 </li>
               ))}
             </ul>
@@ -799,7 +799,7 @@ export default function TierPainterView({ onBack }) {
           <button onClick={handleSave}     style={{ ...styles.btn, marginTop: 4 }} disabled={mapLoading || !nameToBeSaved}>
             {mapLoading ? 'Saving…' : `Save${nameToBeSaved ? ` "${nameToBeSaved}"` : ''}`}
           </button>
-          <button onClick={handleDownload} style={{ ...styles.btn, marginTop: 4, background: '#27ae60' }}>
+          <button onClick={handleDownload} style={{ ...styles.btn, marginTop: 4, color: 'var(--ok)' }}>
             Download JSON
           </button>
           {mapStatus && <p style={styles.mapStatus}>{mapStatus}</p>}
@@ -813,22 +813,22 @@ export default function TierPainterView({ onBack }) {
         </section>
 
         {/* ── Loot Table Tools ─────────────────────────────────────────── */}
-        <div style={styles.toolsDivider} />
+        
         <section style={styles.section}>
-          <label style={{ ...styles.label, color: '#7ab3f0', letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: 11 }}>
+          <label style={{ ...styles.label, color: 'var(--red-hot)' }}>
             Loot Table Tools
           </label>
           <p style={{ ...styles.hint, marginBottom: 6 }}>
             Import a loot table from your Google Sheets template.
           </p>
-          <button onClick={() => setShowImportModal(true)} style={{ ...styles.btn, background: '#1a3a5e', border: '1px solid #2a5a9e' }}>
+          <button onClick={() => setShowImportModal(true)} style={{ ...styles.btn, ...styles.btnActive }}>
             Google Sheets Import
           </button>
         </section>
       </div>
 
       {/* ── Canvas ───────────────────────────────────────────────────────── */}
-      <div style={styles.canvasWrap}>
+      <div className="tool-canvas">
         <canvas
           ref={canvasRef}
           style={styles.canvas}
@@ -849,71 +849,33 @@ export default function TierPainterView({ onBack }) {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+// Layout (shell, sidebar, canvas) lives in index.css so it can stack at phone width.
 const styles = {
-  root: {
-    display: 'flex',
-    height: '100vh',
-    background: '#111',
-    color: '#eee',
-    fontFamily: 'sans-serif',
-    overflow: 'hidden',
-  },
-  sidebar: {
-    width: 220,
-    minWidth: 220,
-    background: '#1e1e2e',
-    padding: '12px 10px',
-    overflowY: 'auto',
-    borderRight: '1px solid #333',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 0,
-  },
-  backBtn: {
-    background: 'transparent',
-    border: '1px solid #555',
-    color: '#aaa',
-    borderRadius: 4,
-    padding: '4px 8px',
-    cursor: 'pointer',
-    marginBottom: 8,
-    alignSelf: 'flex-start',
-  },
-  title: {
-    fontSize: 15,
-    margin: '0 0 10px',
-    color: '#cdf',
-  },
   section: {
-    borderTop: '1px solid #333',
-    paddingTop: 8,
-    marginTop: 6,
+    borderTop: '1px solid var(--line)',
+    paddingTop: 'var(--space-3)',
+    marginTop: 'var(--space-3)',
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
+    gap: 'var(--space-1)',
   },
   label: {
-    fontSize: 11,
-    color: '#888',
+    color: 'var(--muted)',
+    font: 'var(--text-2xs) var(--font-mono)',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
     marginBottom: 2,
   },
   select: {
-    background: '#2a2a3e',
-    color: '#eee',
-    border: '1px solid #444',
-    borderRadius: 4,
-    padding: '3px 6px',
-    fontSize: 12,
+    minHeight: 32,
+    padding: '4px 8px',
+    fontSize: 'var(--text-xs)',
   },
   input: {
-    background: '#2a2a3e',
-    color: '#eee',
-    border: '1px solid #444',
-    borderRadius: 4,
-    padding: '3px 6px',
-    fontSize: 12,
+    minHeight: 32,
+    padding: '4px 8px',
+    fontSize: 'var(--text-xs)',
     width: '100%',
-    boxSizing: 'border-box',
   },
   tierGrid: {
     display: 'flex',
@@ -923,26 +885,25 @@ const styles = {
   tierBtn: {
     width: 36,
     height: 26,
+    padding: 0,
     border: 'none',
-    borderRadius: 4,
     cursor: 'pointer',
-    fontSize: 11,
-    fontWeight: 700,
-    color: '#fff',
+    font: '500 11px var(--font-mono)',
+    color: 'var(--white)',
     textShadow: '0 0 3px #000',
   },
   range: {
     width: '100%',
   },
   btn: {
-    background: '#3a3a5e',
-    color: '#eee',
-    border: 'none',
-    borderRadius: 4,
-    padding: '5px 8px',
-    cursor: 'pointer',
-    fontSize: 12,
+    padding: '6px 10px',
     textAlign: 'left',
+    fontSize: 'var(--text-2xs)',
+  },
+  btnActive: {
+    color: 'var(--white)',
+    borderColor: 'var(--red)',
+    background: 'var(--red-wash)',
   },
   mapList: {
     listStyle: 'none',
@@ -955,46 +916,34 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 4,
-    padding: '2px 0',
-    borderBottom: '1px solid #2a2a3e',
+    margin: 0,
+    padding: '3px 0',
+    borderBottom: '1px solid var(--line)',
   },
   mapName: {
     flex: 1,
-    fontSize: 11,
+    font: '11px var(--font-mono)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    color: '#ccc',
+    color: 'var(--fog)',
   },
   microBtn: {
-    background: 'transparent',
-    border: '1px solid #444',
-    color: '#aaa',
-    borderRadius: 3,
-    padding: '1px 5px',
-    cursor: 'pointer',
+    padding: '1px 6px',
     fontSize: 10,
     whiteSpace: 'nowrap',
+    background: 'transparent',
   },
   mapStatus: {
-    fontSize: 10,
-    color: '#adf',
+    font: '10px var(--font-mono)',
+    color: 'var(--ok)',
     margin: '2px 0 0',
   },
   hint: {
-    fontSize: 10,
-    color: '#666',
+    font: '10px var(--font-mono)',
+    color: 'var(--dim)',
     margin: '1px 0',
     lineHeight: 1.4,
-  },
-  toolsDivider: {
-    borderTop: '1px solid #2a2a3e',
-    margin: '10px 0 2px',
-  },
-  canvasWrap: {
-    flex: 1,
-    overflow: 'hidden',
-    position: 'relative',
   },
   canvas: {
     display: 'block',
