@@ -65,6 +65,8 @@ pipeline {
         }
 
         stage('Build & Push Backend') {
+            // Only master publishes images and deploys; other branches would overwrite :latest and the live site
+            when { expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'master' } }
             steps {
                 container('kaniko-backend') {
                     sh '''
@@ -80,6 +82,8 @@ pipeline {
         }
 
         stage('Build & Push Frontend') {
+            // Only master publishes images and deploys; other branches would overwrite :latest and the live site
+            when { expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'master' } }
             steps {
                 container('kaniko-frontend') {
                     sh '''
@@ -101,6 +105,8 @@ pipeline {
         }
 
         stage('Update GitOps repo') {
+            // Only master publishes images and deploys; other branches would overwrite :latest and the live site
+            when { expression { env.BRANCH_NAME == null || env.BRANCH_NAME == 'master' } }
             steps {
                 container('git') {
                     sh '''
@@ -129,7 +135,13 @@ pipeline {
 
     post {
         success {
-            echo "Built ${BACKEND_IMAGE}:latest and ${FRONTEND_IMAGE}:latest and updated VPSInfrastructure - Argo CD will roll it out."
+            script {
+                if (env.BRANCH_NAME == null || env.BRANCH_NAME == 'master') {
+                    echo "Built ${BACKEND_IMAGE}:latest and ${FRONTEND_IMAGE}:latest and updated VPSInfrastructure - Argo CD will roll it out."
+                } else {
+                    echo "Branch ${env.BRANCH_NAME}: nothing was published or deployed."
+                }
+            }
         }
         failure {
             echo "Pipeline failed."
