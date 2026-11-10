@@ -598,43 +598,39 @@ export default function App() {
     return <TierPainterView onBack={() => setView('dashboard')} />;
   }
 
+  const activeView = view === 'product-detail' ? 'shop' : view;
+  const navClass = (name, extra = '') => `nav-link${extra ? ` ${extra}` : ''}${activeView === name ? ' active' : ''}`;
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#111', color: '#eee' }}>
+    <div className="app-shell">
       {/* ── Top nav bar ──────────────────────────────────────────────── */}
-      <header style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '0 1.5rem', height: 48, background: '#1e1e2e',
-        borderBottom: '1px solid #333', flexShrink: 0,
-      }}>
-        <button
-          type="button"
-          onClick={() => setView('home')}
-          style={{ background: 'transparent', border: 'none', color: '#cdf', fontWeight: 700, fontSize: '0.95rem', padding: '0 4px', cursor: 'pointer' }}
-        >
-          OverKill Development
+      <header className="topbar">
+        <button type="button" className="brand" onClick={() => setView('home')}>
+          <img src="/OverKill_Logobig.png" alt="" />
+          <span><b>OverKill</b> Development</span>
         </button>
 
-        <nav style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button type="button" onClick={openShop} style={navBtnStyle}>Shop</button>
-          <button type="button" onClick={() => setView('cart')} style={navBtnStyle}>
-            Cart{cart.length > 0 ? ` (${cart.length})` : ''}
+        <nav className="nav" aria-label="Main">
+          <button type="button" onClick={openShop} className={navClass('shop')}>Shop</button>
+          <button type="button" onClick={() => setView('cart')} className={navClass('cart')}>
+            Cart{cart.length > 0 && <span className="count">{cart.length}</span>}
           </button>
           {session.authenticated ? (
             <>
-              <button type="button" onClick={openCustomer} style={navBtnStyle}>Dashboard</button>
+              <button type="button" onClick={openCustomer} className={navClass('dashboard')}>Dashboard</button>
               {isAdmin && (
-                <button type="button" onClick={() => setView('admin')} style={{ ...navBtnStyle, color: '#fda', borderColor: '#643' }}>Admin</button>
+                <button type="button" onClick={() => setView('admin')} className={navClass('admin', 'admin')}>Admin</button>
               )}
-              <button type="button" onClick={signOut} style={{ ...navBtnStyle, color: '#f88', borderColor: '#633' }}>Log Out</button>
+              <button type="button" onClick={signOut} className="nav-link">Log Out</button>
             </>
           ) : (
-            <button type="button" onClick={openAuth} style={{ ...navBtnStyle, color: '#8f8', borderColor: '#363' }}>Sign In</button>
+            <button type="button" onClick={openAuth} className={navClass('auth', 'sign-in')}>Sign In</button>
           )}
         </nav>
       </header>
 
       {/* ── Page content ─────────────────────────────────────────────── */}
-      <main style={{ flex: 1, maxWidth: 860, width: '100%', margin: '0 auto', padding: '1.75rem 1.5rem' }}>
+      <main className={view === 'home' ? 'page page-home' : 'page'}>
 
       {view === 'home' && (
         <HomeView
@@ -716,42 +712,30 @@ export default function App() {
       {view === 'refund' && <RefundView />}
 
       {view === 'dashboard' && !session.authenticated && (
-        <section style={{ marginTop: '1.5rem' }}>
+        <section className="panel narrow">
           <p>Please sign in with Steam to access the dashboard.</p>
-          <button type="button" onClick={openAuth}>Go to Sign In</button>
+          <button type="button" className="btn btn-primary" onClick={openAuth}>Go to Sign In</button>
         </section>
       )}
 
       {view === 'customer' && !session.authenticated && (
-        <section style={{ marginTop: '1.5rem' }}>
+        <section className="panel narrow">
           <p>Please sign in with Steam to access customer downloads.</p>
-          <button type="button" onClick={openAuth}>Go to Sign In</button>
+          <button type="button" className="btn btn-primary" onClick={openAuth}>Go to Sign In</button>
         </section>
       )}
 
       </main>
 
       {/* ── Footer ───────────────────────────────────────────────────── */}
-      <footer style={{
-        borderTop: '1px solid #2a2a3e', padding: '0.6rem 1.5rem',
-        display: 'flex', gap: '0.5rem', flexWrap: 'wrap', background: '#1e1e2e',
-        flexShrink: 0,
-      }}>
-        <button type="button" onClick={() => openPolicy('terms')} style={navBtnStyle}>Terms</button>
-        <button type="button" onClick={() => openPolicy('privacy')} style={navBtnStyle}>Privacy</button>
-        <button type="button" onClick={() => openPolicy('refund')} style={navBtnStyle}>Refund</button>
+      <footer className="footer">
+        <span>© OverKill Development · DayZ mods</span>
+        <nav aria-label="Policies">
+          <button type="button" className="btn-text" onClick={() => openPolicy('terms')}>Terms</button>
+          <button type="button" className="btn-text" onClick={() => openPolicy('privacy')}>Privacy</button>
+          <button type="button" className="btn-text" onClick={() => openPolicy('refund')}>Refund</button>
+        </nav>
       </footer>
     </div>
   );
 }
-
-const navBtnStyle = {
-  background: 'transparent',
-  border: '1px solid #444',
-  color: '#ccc',
-  borderRadius: 4,
-  padding: '3px 10px',
-  cursor: 'pointer',
-  fontSize: '0.8rem',
-  fontFamily: 'inherit',
-};
