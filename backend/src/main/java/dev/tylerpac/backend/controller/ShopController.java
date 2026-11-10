@@ -1,18 +1,16 @@
 package dev.tylerpac.backend.controller;
 
+import dev.tylerpac.backend.security.AdminAccess;
+
 import java.security.Principal;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -60,23 +58,20 @@ public class ShopController {
     private final ShopDownloadService shopDownloadService;
     private final UserRepository userRepository;
     private final ProductReleaseRepository productReleaseRepository;
-    private final Set<String> adminSteam64Ids;
+    private final AdminAccess adminAccess;
 
     public ShopController(
         StripeShopService stripeShopService,
         ShopDownloadService shopDownloadService,
         UserRepository userRepository,
         ProductReleaseRepository productReleaseRepository,
-        @Value("${app.admin.steam64-ids:}") String adminSteam64IdsRaw
+        AdminAccess adminAccess
     ) {
         this.stripeShopService = stripeShopService;
         this.shopDownloadService = shopDownloadService;
         this.userRepository = userRepository;
         this.productReleaseRepository = productReleaseRepository;
-        this.adminSteam64Ids = Arrays.stream(adminSteam64IdsRaw.split(","))
-            .map(String::trim)
-            .filter(s -> !s.isEmpty())
-            .collect(Collectors.toSet());
+        this.adminAccess = adminAccess;
     }
 
     @GetMapping("/products")
@@ -514,9 +509,7 @@ public class ShopController {
 
     private User requireAdminUser(Principal principal) {
         User user = requireUser(principal);
-        if (adminSteam64Ids.isEmpty() || !adminSteam64Ids.contains(user.getSteam64Id())) {
-            throw new IllegalArgumentException("forbidden");
-        }
+        adminAccess.requireAdmin(user.getSteam64Id());
         return user;
     }
 

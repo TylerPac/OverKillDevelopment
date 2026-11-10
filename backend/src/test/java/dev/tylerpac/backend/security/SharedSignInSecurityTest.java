@@ -58,6 +58,7 @@ class SharedSignInSecurityTest {
     @MockitoBean private CryptoUtil crypto;
     @MockitoBean private GoogleOAuthService google;
     @MockitoBean private SheetsParsingService sheets;
+    @MockitoBean private AdminAccess adminAccess;
 
     @Test
     void signInStartsAtTheSharedServiceWithPkceAndGoesStraightToSteam() throws Exception {
@@ -86,7 +87,20 @@ class SharedSignInSecurityTest {
 
         mvc.perform(get("/auth/me").with(user(STEAM_ID)))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.steam64Id").value(STEAM_ID));
+            .andExpect(jsonPath("$.steam64Id").value(STEAM_ID))
+            .andExpect(jsonPath("$.admin").value(false));
+    }
+
+    @Test
+    void theAdminFlagComesFromTheAdminCheck() throws Exception {
+        User account = User.fromSteamAccount(STEAM_ID);
+        ReflectionTestUtils.setField(account, "id", 1L);
+        when(users.findByUsername(STEAM_ID)).thenReturn(Optional.of(account));
+        when(adminAccess.isAdmin(STEAM_ID)).thenReturn(true);
+
+        mvc.perform(get("/auth/me").with(user(STEAM_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.admin").value(true));
     }
 
     @Test

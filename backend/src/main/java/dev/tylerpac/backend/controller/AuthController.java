@@ -29,6 +29,7 @@ import dev.tylerpac.backend.model.UserTokenPurpose;
 import dev.tylerpac.backend.repo.ShopOrderRepository;
 import dev.tylerpac.backend.repo.UserGoogleCredentialRepository;
 import dev.tylerpac.backend.repo.UserRepository;
+import dev.tylerpac.backend.security.AdminAccess;
 import dev.tylerpac.backend.service.CryptoUtil;
 import dev.tylerpac.backend.service.DiscordOAuthService;
 import dev.tylerpac.backend.service.GitHubOAuthService;
@@ -56,6 +57,7 @@ public class AuthController {
     private final SheetsParsingService sheetsParsingService;
     private final Environment environment;
     private final String frontendBaseUrl;
+    private final AdminAccess adminAccess;
 
     public AuthController(
         UserRepository userRepository,
@@ -68,7 +70,8 @@ public class AuthController {
         GoogleOAuthService googleOAuthService,
         SheetsParsingService sheetsParsingService,
         Environment environment,
-        @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl
+        @Value("${app.auth.frontend-base-url:http://localhost:5173}") String frontendBaseUrl,
+        AdminAccess adminAccess
     ) {
         this.userRepository = userRepository;
         this.shopOrderRepository = shopOrderRepository;
@@ -81,6 +84,7 @@ public class AuthController {
         this.sheetsParsingService = sheetsParsingService;
         this.environment = environment;
         this.frontendBaseUrl = frontendBaseUrl;
+        this.adminAccess = adminAccess;
     }
 
     @GetMapping("/discord/link-url")
@@ -259,7 +263,9 @@ public class AuthController {
             Map.entry("accountSetupComplete", StringUtils.hasText(user.getSteam64Id())),
             Map.entry("premiumUser", user.isPremiumUser()),
             Map.entry("subscriptionStatus", user.getStripeSubscriptionStatus() == null ? "none" : user.getStripeSubscriptionStatus()),
-            Map.entry("githubReposByProduct", githubReposByProduct)
+            Map.entry("githubReposByProduct", githubReposByProduct),
+            // Checked with the login service each time, so the admin menu follows changes straight away
+            Map.entry("admin", adminAccess.isAdmin(user.getSteam64Id()))
         ));
     }
 

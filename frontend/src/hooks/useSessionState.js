@@ -39,6 +39,8 @@ export default function useSessionState(onSessionExpired) {
   const [githubReposByProduct, setGithubReposByProduct] = useState({});
   const [accountSetupComplete, setAccountSetupComplete] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
+  // From the backend, which asks the shared login service; never decided in the browser
+  const [admin, setAdmin] = useState(false);
 
   const authenticated = Boolean(currentUser);
   const signedIn = useRef(false);
@@ -58,6 +60,7 @@ export default function useSessionState(onSessionExpired) {
     setGithubReposByProduct({});
     setAccountSetupComplete(false);
     setEmailVerified(false);
+    setAdmin(false);
   }
 
   function applyProfile(me) {
@@ -69,6 +72,7 @@ export default function useSessionState(onSessionExpired) {
     setGithubReposByProduct(me?.githubReposByProduct || {});
     setEmailVerified(Boolean(me?.emailVerified));
     setAccountSetupComplete(Boolean(me?.accountSetupComplete));
+    setAdmin(me?.admin === true);
   }
 
   useEffect(() => {
@@ -101,6 +105,7 @@ export default function useSessionState(onSessionExpired) {
     githubReposByProduct,
     accountSetupComplete,
     emailVerified,
+    admin,
     authenticated,
     clearSession,
     loadAuthProfile,

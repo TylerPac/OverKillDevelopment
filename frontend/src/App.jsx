@@ -21,8 +21,6 @@ import ProductDetailView from './views/ProductDetailView';
 import ShopView from './views/ShopView';
 import TierPainterView from './views/TierPainterView';
 
-const ADMIN_STEAM_ID = '76561199155324762';
-
 export default function App() {
   const [view, setView] = useState('home');
   const [status, setStatus] = useState('Sign in with Steam to access your dashboard and purchases.');
@@ -41,7 +39,8 @@ export default function App() {
     setStatus(message);
   });
 
-  const isAdmin = session.steam64Id === ADMIN_STEAM_ID;
+  // The backend checks admins with the shared login service (managed at auth.tylerpac.dev/admin)
+  const isAdmin = session.admin;
 
 
   // Ensure products are loaded on home and shop views
