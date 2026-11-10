@@ -101,7 +101,7 @@ public class SecurityConfig {
             // A session cookie is sent automatically, so state-changing requests need a CSRF token
             .csrf(csrf -> csrf.spa().ignoringRequestMatchers(NO_SESSION_POSTS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**", "/api/google/**", "/api/dayz/**", "/actuator/**", "/shop/webhook", "/shop/products", "/shop/access-codes/full-unlock", "/shop/access-codes/create", "/shop/download-stream").permitAll()
+                .requestMatchers("/auth/**", "/api/google/**", "/api/dayz/**", "/actuator/**", "/shop/webhook", "/shop/products", "/shop/product-links", "/shop/access-codes/full-unlock", "/shop/access-codes/create", "/shop/download-stream").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { getProductLinks } from '../services/downloadsService';
 
 // Showcase metadata per product — update text/features/changelog as mods evolve
 const productMeta = {
@@ -260,6 +261,16 @@ export default function ProductDetailView({
   const [isAuto, setIsAuto] = useState(true);
   const [imgErrors, setImgErrors] = useState(new Set());
   const autoTimerRef = useRef(null);
+  const [githubUrl, setGithubUrl] = useState(null);
+
+  // Set per product on the admin page
+  useEffect(() => {
+    let active = true;
+    getProductLinks()
+      .then((links) => { if (active) setGithubUrl(links[product.id] || null); })
+      .catch(() => { if (active) setGithubUrl(null); });
+    return () => { active = false; };
+  }, [product.id]);
 
   const meta = productMeta[product.id] || {};
   const price = `${(product.amountCents / 100).toFixed(2)} ${String(product.currency || '').toUpperCase()}`;
@@ -362,6 +373,11 @@ export default function ProductDetailView({
           </button>
           {!accountSetupComplete && (
             <p className="notice warn">Link your Steam account before buying.</p>
+          )}
+          {githubUrl && (
+            <a className="btn-text" href={githubUrl} target="_blank" rel="noopener noreferrer">
+              View on GitHub →
+            </a>
           )}
         </div>
       </div>

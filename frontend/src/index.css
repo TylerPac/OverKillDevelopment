@@ -627,3 +627,12 @@ input[type='checkbox'], input[type='radio'] { min-height: 0; accent-color: var(-
   .tool-sidebar { width: 100%; min-width: 0; max-height: 55vh; border-right: 0; border-bottom: 1px solid var(--line); }
   .tool-canvas { height: 70vh; flex: none; }
 }
+
+/* Admin downloads: upload progress and per-product file choices */
+.progress { height: 6px; margin-top: var(--space-2); background: var(--coal-deep); border: 1px solid var(--line); }
+.progress > span { display: block; height: 100%; background: var(--red); transition: width 0.3s ease; }
+.file-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.file-choices .chip { cursor: pointer; }
+.download-product { padding: var(--space-4) 0; border-bottom: 1px solid var(--line); }
+.download-product:last-child { border-bottom: 0; }
+.download-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3) var(--space-4); }

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import DownloadsAdmin from './DownloadsAdmin';
 import { listAccessCodes, createFullUnlockCode, createSpecificCode, revokeCode, deleteCode } from '../services/adminService';
 import { markProductRelease } from '../services/apiClient';
 
@@ -345,6 +346,8 @@ export default function AdminView() {
           </div>
         )}
       </section>
+
+      <DownloadsAdmin />
     </section>
   );
 }

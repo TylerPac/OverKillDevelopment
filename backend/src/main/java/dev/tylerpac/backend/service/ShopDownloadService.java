@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import dev.tylerpac.backend.downloads.DownloadServiceClient;
+import dev.tylerpac.backend.downloads.DownloadServiceException;
 import dev.tylerpac.backend.model.DownloadToken;
 import dev.tylerpac.backend.model.User;
 import dev.tylerpac.backend.repo.DownloadTokenRepository;
@@ -31,17 +33,20 @@ public class ShopDownloadService {
     private final DownloadTokenRepository downloadTokenRepository;
     private final Path downloadRoot;
     private final Environment env;
+    private final DownloadServiceClient downloads;
 
     public ShopDownloadService(
         ShopOrderRepository shopOrderRepository,
         DownloadTokenRepository downloadTokenRepository,
         @Value("${app.shop.download-root:downloads}") String downloadRoot,
-        Environment env
+        Environment env,
+        DownloadServiceClient downloads
     ) {
         this.shopOrderRepository = shopOrderRepository;
         this.downloadTokenRepository = downloadTokenRepository;
         this.downloadRoot = Paths.get(downloadRoot).toAbsolutePath().normalize();
         this.env = env;
+        this.downloads = downloads;
     }
 
     public Optional<String> findDownloadLink(User user, String productId) {
@@ -56,6 +61,22 @@ public class ShopDownloadService {
         boolean purchased = shopOrderRepository.existsByUserAndProductIdAndStatusIgnoreCase(user, productId, STATUS_PAID);
         if (!purchased) {
             throw new IllegalArgumentException("purchase_required");
+        }
+
+        // A product whose download is set up on the admin page: a short-lived link to its one zip
+        // (the mod plus Core and API), always the current version
+        if (downloads.isConfigured()) {
+            try {
+                String url = downloads.bundleLink(productId).path("url").asString("");
+                if (StringUtils.hasText(url)) {
+                    return Optional.of(url);
+                }
+            } catch (DownloadServiceException e) {
+                // Not set up for this product yet, or still building: fall back below. Anything else is an outage.
+                if (e.status() != 404 && e.status() != 409) {
+                    throw new IllegalStateException("download_unavailable");
+                }
+            }
         }
 
         String link = env.getProperty("app.shop.download-link." + productId);

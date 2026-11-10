@@ -306,6 +306,8 @@ public class ShopController {
                     ResponseEntity.badRequest().body(ex.getMessage());
                 default -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ex.getMessage());
             };
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("download_unavailable");
         }
     }
 
