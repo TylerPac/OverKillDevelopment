@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import DownloadsAdmin from './DownloadsAdmin';
+import UniversalAdmin from './UniversalAdmin';
 import { listGrants, grantProducts, revokeGrant } from '../services/adminService';
 import { getProducts } from '../services/shopService';
 import { markProductRelease } from '../services/apiClient';
@@ -313,6 +314,8 @@ export default function AdminView() {
       </section>
 
       <DownloadsAdmin />
+
+      <UniversalAdmin />
     </section>
   );
 }
