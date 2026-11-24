@@ -101,6 +101,12 @@ public class UniversalApiClient {
             .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class));
     }
 
+    /** Removes a disabled server and what it published; 409 server_enabled while it is still enabled. */
+    public void deleteServer(String actor, String serverId) {
+        call(() -> restClient.delete().uri(SERVERS + "/{serverId}", serverId).header(ACTOR, actor)
+            .retrieve().toBodilessEntity());
+    }
+
     private <T> T call(Supplier<T> request) {
         if (!configured) {
             throw new UniversalApiException(HttpStatus.SERVICE_UNAVAILABLE, "admin_not_configured");

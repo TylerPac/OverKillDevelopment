@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  deleteGameServer,
   getMapLinkPlayer,
   getMapLinkStateText,
   getPlatform,
@@ -31,6 +32,7 @@ const MESSAGES = {
   invalid_api_key: 'API keys are 16-256 characters of letters, numbers and - _ . ~.',
   server_id_taken: 'A server with that ID is already registered.',
   server_not_found: 'That server no longer exists.',
+  server_enabled: 'Disable the server before deleting it.',
   server_required: 'Pick a server to restore to.',
 };
 
@@ -355,6 +357,7 @@ function MapLinkAdmin({ servers }) {
 function ServersAdmin({ servers, info, loadError, reload }) {
   const [rowError, setRowError] = useState('');
   const [confirmDisable, setConfirmDisable] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [newId, setNewId] = useState('');
   const [newKey, setNewKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -371,6 +374,18 @@ function ServersAdmin({ servers, info, loadError, reload }) {
       setRowError(describe(err));
     } finally {
       setConfirmDisable(null);
+    }
+  }
+
+  async function remove(server) {
+    setRowError('');
+    try {
+      await deleteGameServer(server.serverId);
+      reload();
+    } catch (err) {
+      setRowError(describe(err));
+    } finally {
+      setConfirmDelete(null);
     }
   }
 
@@ -455,7 +470,17 @@ function ServersAdmin({ servers, info, loadError, reload }) {
                   <td className="actions">
                     <div className="button-row end">
                       {!s.enabled ? (
-                        <button type="button" className="btn btn-sm" onClick={() => toggle(s, true)}>Enable</button>
+                        <>
+                          <button type="button" className="btn btn-sm" onClick={() => toggle(s, true)}>Enable</button>
+                          {confirmDelete === s.serverId ? (
+                            <>
+                              <button type="button" className="btn btn-sm btn-danger" onClick={() => remove(s)}>Confirm delete</button>
+                              <button type="button" className="btn btn-sm" onClick={() => setConfirmDelete(null)}>Keep</button>
+                            </>
+                          ) : (
+                            <button type="button" className="btn btn-sm btn-danger" onClick={() => setConfirmDelete(s.serverId)}>Delete</button>
+                          )}
+                        </>
                       ) : confirmDisable === s.serverId ? (
                         <>
                           <button type="button" className="btn btn-sm btn-danger" onClick={() => toggle(s, false)}>Confirm disable</button>

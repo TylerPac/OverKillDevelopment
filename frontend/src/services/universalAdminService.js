@@ -30,6 +30,9 @@ export const registerGameServer = (serverId, apiKey) =>
     body: JSON.stringify({ serverId, apiKey }),
   });
 
+export const deleteGameServer = (serverId) =>
+  callJson(`${BASE}/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' });
+
 export const setGameServerEnabled = (serverId, enabled) =>
   callJson(`${BASE}/servers/${encodeURIComponent(serverId)}`, {
     method: 'PATCH',

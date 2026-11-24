@@ -7,6 +7,7 @@ import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -124,6 +125,14 @@ public class UniversalAdminController {
         ObjectNode forward = JsonNodeFactory.instance.objectNode();
         forward.put("enabled", body.path("enabled").booleanValue());
         return universalApi.setServerEnabled(admin, UniversalAdminSupport.requireServerId(serverId), forward);
+    }
+
+    /** Only a disabled server can be deleted (409 server_enabled). */
+    @DeleteMapping("/servers/{serverId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteServer(Principal principal, @PathVariable String serverId) {
+        String admin = support.requireAdmin(principal);
+        universalApi.deleteServer(admin, UniversalAdminSupport.requireServerId(serverId));
     }
 
     // ---- errors ------------------------------------------------------------------------------------------
