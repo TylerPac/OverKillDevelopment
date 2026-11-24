@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   deleteGameServer,
   getMapLinkPlayer,
@@ -6,6 +6,7 @@ import {
   getPlatform,
   listGameServers,
   listMapLinkPlayers,
+  releaseMapLinkPlayer,
   registerGameServer,
   restoreMapLinkState,
   setGameServerEnabled,
@@ -80,6 +81,8 @@ function MapLinkAdmin({ servers }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const detailRef = useRef(null);
 
   const load = useCallback((state) => {
     listMapLinkPlayers(state)
@@ -106,10 +109,29 @@ function MapLinkAdmin({ servers }) {
     setNotice('');
     setViewing(null);
     setRestoring(null);
+    setConfirmRelease(false);
     try {
       setPlayer(await getMapLinkPlayer(steamId));
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     } catch (err) {
       setListError(describe(err));
+    }
+  }
+
+  // Kills the character on record: the player spawns fresh on any server at their next login.
+  async function release() {
+    setBusy(true);
+    setError('');
+    try {
+      await releaseMapLinkPlayer(player.steamId);
+      setNotice('Character killed. The player spawns fresh on any server at their next login. Their saved characters below can still be restored.');
+      setPlayer(await getMapLinkPlayer(player.steamId));
+      load(filter);
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setBusy(false);
+      setConfirmRelease(false);
     }
   }
 
@@ -216,7 +238,7 @@ function MapLinkAdmin({ servers }) {
 
       {listError && <p className="notice error">{listError}</p>}
 
-      <div className="split">
+      <div className="stack">
         <div>
           {rows === null && !listError && <p className="notice">Loading…</p>}
           {rows !== null && rows.length === 0 && (
@@ -226,7 +248,7 @@ function MapLinkAdmin({ servers }) {
           )}
           {rows !== null && rows.length > 0 && (
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table compact">
                 <thead>
                   <tr><th>Player</th><th>State</th><th>Where</th><th>Changed</th></tr>
                 </thead>
@@ -253,7 +275,7 @@ function MapLinkAdmin({ servers }) {
           )}
         </div>
 
-        <div>
+        <div ref={detailRef}>
           {!player && <p className="muted">Pick a player to see where their character is and what MapLink saved.</p>}
           {player && (
             <div className="panel">
@@ -270,12 +292,34 @@ function MapLinkAdmin({ servers }) {
               {notice && <p className="notice ok">{notice}</p>}
               {error && <p className="notice error">{error}</p>}
 
+              {(player.state === 'ALIVE' || player.state === 'TRANSIT') && (
+                <div className="field">
+                  {confirmRelease ? (
+                    <>
+                      <p className="notice warn">
+                        This kills the character on record, so the player can spawn fresh on any map at their next
+                        login. Saved characters stay and can still be restored. A player online right now keeps
+                        playing until they log out.
+                      </p>
+                      <div className="button-row">
+                        <button type="button" className="btn btn-danger" onClick={release} disabled={busy}>Confirm kill</button>
+                        <button type="button" className="btn" onClick={() => setConfirmRelease(false)}>Cancel</button>
+                      </div>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-danger" onClick={() => setConfirmRelease(true)}>
+                      Kill character (spawn anywhere)
+                    </button>
+                  )}
+                </div>
+              )}
+
               <h3>Saved characters</h3>
               {player.states.length === 0 ? (
                 <p className="muted">Nothing saved yet. A copy is saved every time MapLink carries this player to another server.</p>
               ) : (
                 <div className="table-wrap">
-                  <table className="data-table">
+                  <table className="data-table compact">
                     <thead>
                       <tr><th>#</th><th>Event</th><th>From → to</th><th>Life</th><th>Size</th><th>Saved</th><th /></tr>
                     </thead>
@@ -447,7 +491,7 @@ function ServersAdmin({ servers, info, loadError, reload }) {
 
       {servers !== null && servers.length > 0 && (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table compact">
             <thead>
               <tr><th>Server</th><th>Address</th><th>Players</th><th>Terminals</th><th>Heartbeat</th><th>Status</th><th /></tr>
             </thead>

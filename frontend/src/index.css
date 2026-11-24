@@ -524,6 +524,9 @@ input[type='checkbox'], input[type='radio'] { min-height: 0; accent-color: var(-
 .inline-form input { flex: 1 1 240px; min-width: 0; }
 
 /* Two columns that stack on narrow screens */
+.data-table.compact { min-width: 0; }
+.data-table.compact th { white-space: normal; }
+.data-table.compact .actions { white-space: normal; }
 .split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 
 /* Key/value facts on the account tab */

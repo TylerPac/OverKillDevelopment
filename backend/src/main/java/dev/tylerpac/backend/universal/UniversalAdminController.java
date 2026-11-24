@@ -75,6 +75,13 @@ public class UniversalAdminController {
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(json);
     }
 
+    /** Kills the character on record so the player can spawn fresh on any server. */
+    @PostMapping("/maplink/players/{steamId}/release")
+    public JsonNode release(Principal principal, @PathVariable String steamId) {
+        String admin = support.requireAdmin(principal);
+        return universalApi.releaseMapLinkPlayer(admin, UniversalAdminSupport.requireSteamId(steamId));
+    }
+
     /** Body: {"serverId": "..."}: the game server the player gets the character on. */
     @PostMapping("/maplink/players/{steamId}/states/{stateId}/restore")
     public JsonNode restore(Principal principal, @PathVariable String steamId, @PathVariable long stateId,

@@ -84,6 +84,12 @@ public class UniversalApiClient {
             .header(ACTOR, actor).contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class));
     }
 
+    /** Kills the character on record so the player spawns fresh on any server; 409 nothing_to_release when none. */
+    public JsonNode releaseMapLinkPlayer(String actor, String steamId) {
+        return call(() -> restClient.post().uri(MAPLINK + "/{steamId}/release", steamId).header(ACTOR, actor)
+            .retrieve().body(JsonNode.class));
+    }
+
     /** Every game server registered with this Universal API, with what it published to MapLink. */
     public JsonNode listServers() {
         return call(() -> restClient.get().uri(SERVERS).retrieve().body(JsonNode.class));

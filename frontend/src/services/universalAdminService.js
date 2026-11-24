@@ -21,6 +21,9 @@ export const restoreMapLinkState = (steamId, stateId, serverId) =>
     body: JSON.stringify({ serverId }),
   });
 
+export const releaseMapLinkPlayer = (steamId) =>
+  callJson(`${BASE}/maplink/players/${steamId}/release`, { method: 'POST' });
+
 export const listGameServers = () => callJson(`${BASE}/servers`);
 
 export const registerGameServer = (serverId, apiKey) =>
